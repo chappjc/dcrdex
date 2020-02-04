@@ -2,8 +2,9 @@ package order
 
 import (
 	"bytes"
-	"encoding/binary"
+	crand "crypto/rand"
 	"fmt"
+	"math/rand"
 	"testing"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -33,11 +34,11 @@ func makeCommitment(pimg order.Preimage) order.Commitment {
 	return order.Commitment(blake256.Sum256(pimg[:]))
 }
 
-// makeMatchProof generates the sorting seed and commmitment checksum from the
+// makeMatchProof generates the sorting seed and commitment checksum from the
 // provided ordered set of preimages and commitments.
-func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) (int64, msgjson.Bytes, error) {
+func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) ([]byte, []byte, error) {
 	if len(preimages) != len(commitments) {
-		return 0, nil, fmt.Errorf("expected equal number of preimages and commitments")
+		return nil, nil, fmt.Errorf("expected equal number of preimages and commitments")
 	}
 
 	sbuff := make([]byte, 0, len(preimages)*order.PreimageSize)
@@ -46,19 +47,54 @@ func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) 
 		sbuff = append(sbuff, preimages[i][:]...)
 		cbuff = append(cbuff, commitments[i][:]...)
 	}
-	seed := int64(binary.LittleEndian.Uint64(sbuff[:64]))
+	seed := blake256.Sum256(sbuff)
 	csum := blake256.Sum256(cbuff)
-	return seed, msgjson.Bytes(csum[:]), nil
+	return seed[:], csum[:], nil
 }
 
-func makeSortOrder(ids ...order.OrderID) []order.OrderID {
-	so := make([]order.OrderID, 0, len(ids))
-	for _, entry := range ids {
-		var oid order.OrderID
-		copy(oid[:], entry[:])
-		so = append(so, oid)
+func randOrderID() (oid order.OrderID) {
+	crand.Read(oid[:])
+	return
+}
+
+func randPreimage() (pi order.Preimage) {
+	crand.Read(pi[:])
+	return
+}
+
+func BenchmarkEpochQueue(b *testing.B) {
+	sz := 500
+	notes := make([]*msgjson.EpochOrderNote, sz)
+	preimages := make([]order.Preimage, 0, sz)
+	for i := range notes {
+		pi := randPreimage()
+		notes[i] = makeEpochOrderNote("mkt", msgjson.BuyOrderNum, randOrderID(), 1, 3, blake256.Sum256(pi[:]))
+		preimages = append(preimages, pi)
 	}
-	return so
+
+	numMisses := sz / 20
+	misses := make([]order.OrderID, numMisses)
+	for i := range misses {
+		in := rand.Intn(len(notes))
+		copy(misses[i][:], notes[in].OrderID)
+	}
+
+	eq := NewEpochQueue()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		eq.Reset()
+
+		for _, note := range notes {
+			eq.Enqueue(note)
+		}
+
+		_, _, err := eq.GenerateMatchProof(preimages, misses)
+		if err != nil {
+			b.Error(err)
+		}
+	}
 }
 
 func TestEpochQueue(t *testing.T) {
@@ -68,7 +104,7 @@ func TestEpochQueue(t *testing.T) {
 	n1Commitment := makeCommitment(n1Pimg)
 	n1OrderID := [32]byte{'a'}
 	n1 := makeEpochOrderNote(mid, msgjson.BuyOrderNum, n1OrderID, 1, 3, n1Commitment)
-	eq.Queue(n1)
+	eq.Enqueue(n1)
 
 	// Ensure the epoch queue size is 1.
 	if eq.Size() != 1 {
@@ -83,19 +119,19 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[Size] expected queue size of %d, got %d", 0, eq.Size())
 	}
 
-	eq.Queue(n1)
+	eq.Enqueue(n1)
 
 	n2Pimg := [32]byte{'2'}
 	n2Commitment := makeCommitment(n2Pimg)
 	n2OrderID := [32]byte{'b'}
 	n2 := makeEpochOrderNote(mid, msgjson.BuyOrderNum, n2OrderID, 2, 4, n2Commitment)
-	eq.Queue(n2)
+	eq.Enqueue(n2)
 
 	n3Pimg := [32]byte{'3'}
 	n3Commitment := makeCommitment(n3Pimg)
 	n3OrderID := [32]byte{'c'}
 	n3 := makeEpochOrderNote(mid, msgjson.BuyOrderNum, n3OrderID, 3, 6, n3Commitment)
-	eq.Queue(n3)
+	eq.Enqueue(n3)
 
 	// Ensure the queue has n2 epoch order.
 	if !eq.Exists(n2OrderID) {
@@ -106,30 +142,6 @@ func TestEpochQueue(t *testing.T) {
 	if eq.Size() != 3 {
 		t.Fatalf("[Size] expected queue size of %d, got %d", 3, eq.Size())
 	}
-
-	// Ensure the seed index has the expected order.
-	expectedSeedSO := makeSortOrder(n1OrderID, n2OrderID, n3OrderID)
-
-	eq.seedIndexMtx.Lock()
-	for i := 0; i < len(eq.seedIndex); i++ {
-		if !bytes.Equal(expectedSeedSO[i][:], eq.seedIndex[i][:]) {
-			t.Fatalf("expected id %s at seed sort order index %d, got %s",
-				expectedSeedSO[i].String(), i, eq.seedIndex[i].String())
-		}
-	}
-	eq.seedIndexMtx.Unlock()
-
-	// Ensure the commitment index has the expected order.
-	expectedCommitmentSO := makeSortOrder(n3OrderID, n1OrderID, n2OrderID)
-
-	eq.commitmentIndexMtx.Lock()
-	for i := 0; i < len(eq.commitmentIndex); i++ {
-		if !bytes.Equal(expectedCommitmentSO[i][:], eq.commitmentIndex[i][:]) {
-			t.Fatalf("expected id %s at commitment sort order index %d, got %s",
-				expectedCommitmentSO[i].String(), i, eq.seedIndex[i].String())
-		}
-	}
-	eq.commitmentIndexMtx.Unlock()
 
 	// Ensure match proof generation works as expected.
 	preimages := []order.Preimage{n1Pimg, n2Pimg, n3Pimg}
@@ -144,8 +156,8 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
 
-	if expectedSeed != seed {
-		t.Fatalf("expected seed %d, got %d", expectedSeed, seed)
+	if !bytes.Equal(expectedSeed, seed) {
+		t.Fatalf("expected seed %x, got %x", expectedSeed, seed)
 	}
 
 	if !bytes.Equal(expectedCmtChecksum, cmtChecksum) {
@@ -156,34 +168,14 @@ func TestEpochQueue(t *testing.T) {
 	eq.Reset()
 
 	// Queue epoch orders.
-	eq.Queue(n3)
-	eq.Queue(n1)
-	eq.Queue(n2)
+	eq.Enqueue(n3)
+	eq.Enqueue(n1)
+	eq.Enqueue(n2)
 
 	// Ensure the queue has n1 epoch order.
 	if !eq.Exists(n1OrderID) {
 		t.Fatalf("[Exists] expected order with id %x in the epoch queue", n1OrderID)
 	}
-
-	// Ensure the seed index has the expected order.
-	eq.seedIndexMtx.Lock()
-	for i := 0; i < len(eq.seedIndex); i++ {
-		if !bytes.Equal(expectedSeedSO[i][:], eq.seedIndex[i][:]) {
-			t.Fatalf("expected id %s at seed sort order index %d, got %s",
-				expectedSeedSO[i].String(), i, eq.seedIndex[i].String())
-		}
-	}
-	eq.seedIndexMtx.Unlock()
-
-	// Ensure the commitment index has the expected order.
-	eq.commitmentIndexMtx.Lock()
-	for i := 0; i < len(eq.commitmentIndex); i++ {
-		if !bytes.Equal(expectedCommitmentSO[i][:], eq.commitmentIndex[i][:]) {
-			t.Fatalf("expected id %s at commitment sort order index %d, got %s",
-				expectedCommitmentSO[i].String(), i, eq.seedIndex[i].String())
-		}
-	}
-	eq.commitmentIndexMtx.Unlock()
 
 	// Ensure match proof generation works as expected, when there are misses.
 	preimages = []order.Preimage{n1Pimg, n3Pimg}
@@ -193,14 +185,16 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[makeMatchProof] unexpected error: %v", err)
 	}
 
-	misses := []string{n2.OrderID.String()}
+	var oidn2 order.OrderID
+	copy(oidn2[:], n2.OrderID)
+	misses := []order.OrderID{oidn2}
 	seed, cmtChecksum, err = eq.GenerateMatchProof(preimages, misses)
 	if err != nil {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
 
-	if expectedSeed != seed {
-		t.Fatalf("expected seed %d, got %d", expectedSeed, seed)
+	if !bytes.Equal(expectedSeed, seed) {
+		t.Fatalf("expected seed %x, got %x", expectedSeed, seed)
 	}
 
 	if !bytes.Equal(expectedCmtChecksum, cmtChecksum) {
