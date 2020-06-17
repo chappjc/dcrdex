@@ -165,6 +165,30 @@ func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network
 	return btc, nil
 }
 
+func (btc *Backend) BestBlockHeight() (int64, error) {
+	hash, err := btc.client.GetBestBlockHash()
+	if err != nil {
+		return 0, err
+	}
+	hdr, err := btc.client.GetBlockHeaderVerbose(hash)
+	if err != nil {
+		return 0, err
+	}
+	return int64(hdr.Height), nil
+}
+
+func (btc *Backend) BlockTimeStamp(height int64) (time.Time, error) {
+	hash, err := btc.client.GetBlockHash(height)
+	if err != nil {
+		return time.Time{}, err
+	}
+	hdr, err := btc.client.GetBlockHeader(hash)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return hdr.Timestamp, nil
+}
+
 // Contract is part of the asset.Backend interface. An asset.Contract is an
 // output that has been validated as a swap contract for the passed redeem
 // script. A spendable output is one that can be spent in the next block. Every
