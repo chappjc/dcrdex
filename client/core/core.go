@@ -2374,7 +2374,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 	}
 
 	errs := newErrorSet(dc.acct.host + ": ")
-	ready := make([]*trackedTrade, 0, len(dc.trades))
+	ready := make([]*trackedTrade, 0, len(trades))
 	for _, trade := range trades {
 		if !trade.isActive() {
 			// In this event, there is a discrepancy between the active criteria

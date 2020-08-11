@@ -297,6 +297,10 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 			log.Errorf("%s did not report active match %s on order %s", host, mid, t.ID())
 		}
 	}
+	// If the server is reporting active matches that we don't already know
+	// about, we missed a match request, but the matches are not revoked yet. In
+	// this case, the server should have a queued match request that will be
+	// handled by handleRequestRoute.
 	if len(extras) > 0 {
 		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), host, t.token())
 		t.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
@@ -581,7 +585,29 @@ func (t *trackedTrade) isActive() bool {
 	defer t.mtx.RUnlock()
 
 	// Status of the order itself.
-	if t.metaData.Status == order.OrderStatusBooked || t.metaData.Status == order.OrderStatusEpoch {
+	if t.metaData.Status == order.OrderStatusBooked {
+		return true
+	}
+
+	// Epoch status orders are active unless the client missed a preimage
+	// request. Infer this is the case if it is presently more than 30 minutes
+	// after the close of the order's epoch, since if we did send the preimage
+	// any queued match/nomatch messages for this client would have expired and
+	// the order been revoked. If we did not send the preimage, any queued
+	// preimage request for this client would have expired, thus revoking the
+	// order before any matches were made. This assumes the market's epoch
+	// duration did not change.
+	if t.metaData.Status == order.OrderStatusEpoch {
+		stamp := t.Prefix().ServerTime
+		epoch := order.EpochID{Idx: encode.UnixMilliU(stamp) / t.epochLen, Dur: t.epochLen}
+		if time.Since(epoch.End()) > 10*time.Minute {
+			log.Debugf("Order %v in epoch status with server time stamp %v (%v ago) considered inactive.",
+				t.ID(), stamp, time.Since(stamp))
+			// Since this order cannot have matches (would be booked or
+			// executed), and no more matches will be added (the order and any
+			// matches will have been revoked by now), it is inactive.
+			return false
+		}
 		return true
 	}
 
