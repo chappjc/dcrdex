@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -1155,6 +1156,11 @@ func (t *trackedTrade) finalizeSwapAction(match *matchTracker, coinID, contract 
 	// penalized).
 	timeout := t.broadcastTimeout()
 	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout); err != nil {
+		var rpcErr *msgjson.Error
+		if errors.As(err, &rpcErr) && rpcErr.Code == msgjson.RPCUnknownMatch {
+			match.failErr = err // probably means the match was revoked when client was disconnected
+			// what is a better action?  just set failErr or do something specific?
+		}
 		errs.add("error sending 'init' message for match %s: %v", match.id, err)
 	} else if err := t.dc.acct.checkSig(init.Serialize(), ack.Sig); err != nil {
 		errs.add("'init' ack signature error for match %s: %v", match.id, err)
@@ -1257,6 +1263,11 @@ func (t *trackedTrade) finalizeRedeemAction(match *matchTracker, coinID []byte) 
 	// that long for a response.
 	timeout := t.broadcastTimeout()
 	if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout); err != nil {
+		var rpcErr *msgjson.Error
+		if errors.As(err, &rpcErr) && rpcErr.Code == msgjson.RPCUnknownMatch {
+			match.failErr = err // probably means the match was revoked when client was disconnected
+			// what is a better action?  just set failErr or do something specific?
+		}
 		errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
 	} else if err := t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig); err != nil {
 		errs.add("'redeem' ack signature error for match %s: %v", match.id, err)

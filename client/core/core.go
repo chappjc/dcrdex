@@ -3463,7 +3463,7 @@ func sendRequest(conn comms.WsConn, route string, request, response interface{},
 
 	errChan := make(chan error, 1)
 	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(response)
+		errChan <- msg.UnmarshalResult(response) // if non-nil, may be json.UnmarshalTypeError or msgjson.Error
 	}, timeout, func() {
 		errChan <- fmt.Errorf("timed out waiting for '%s' response", route)
 	})
