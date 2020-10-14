@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -1285,7 +1286,17 @@ func TestHandleRegister(t *testing.T) {
 		return msg
 	}
 
+	newIP := func() string {
+		netIP := make(net.IP, net.IPv6len)
+		if rand.Intn(6) >= 4 {
+			netIP = make(net.IP, net.IPv4len)
+		}
+		rand.Read(netIP[:])
+		return netIP.String()
+	}
+
 	do := func(msg *msgjson.Message) *msgjson.Error {
+		user.conn.ip = newIP()
 		return rig.mgr.handleRegister(user.conn, msg)
 	}
 

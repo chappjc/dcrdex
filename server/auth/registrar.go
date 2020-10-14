@@ -6,6 +6,7 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
@@ -23,8 +24,37 @@ var (
 	txWaitExpiration = time.Minute
 )
 
+type IP [net.IPv6len]byte
+
+func parseIP(addr string) IP {
+	ip := net.ParseIP(addr)
+	if ip.To4() == nil {
+		ip = ip.Mask(net.CIDRMask(64, 128))
+	}
+	var ipKey IP
+	copy(ipKey[:], ip)
+	return ipKey
+}
+
 // handleRegister handles requests to the 'register' route.
 func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	// Limit register route to one request per IP every 10 minutes.
+	ipKey := parseIP(conn.IP())
+	auth.regBlockMtx.Lock()
+	if _, found := auth.regBlocks[ipKey]; found {
+		auth.regBlockMtx.Unlock()
+		return &msgjson.Error{
+			Code:    msgjson.RPCRegisterError,
+			Message: "too soon",
+		}
+	}
+	auth.regBlocks[ipKey] = time.AfterFunc(10*time.Minute, func() {
+		auth.regBlockMtx.Lock()
+		delete(auth.regBlocks, ipKey)
+		auth.regBlockMtx.Unlock()
+	})
+	auth.regBlockMtx.Unlock()
+
 	// Unmarshal.
 	register := new(msgjson.Register)
 	err := json.Unmarshal(msg.Payload, &register)
@@ -220,6 +250,14 @@ func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, 
 	}
 
 	log.Infof("New user registered: acct %v, paid %d to %v", acctID, val, addr)
+
+	ipKey := parseIP(conn.IP())
+	auth.regBlockMtx.Lock()
+	if tt, ok := auth.regBlocks[ipKey]; ok {
+		tt.Stop()
+		delete(auth.regBlocks, ipKey)
+	}
+	auth.regBlockMtx.Unlock()
 
 	// Create, sign, and send the the response.
 	err = auth.Sign(notifyFee)
