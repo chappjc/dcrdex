@@ -4,6 +4,7 @@
 package comms
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -59,7 +60,8 @@ type wsLink struct {
 	respHandlers map[uint64]*responseHandler
 	// Upon closing, the client's IP address will be quarantined by the server if
 	// ban = true.
-	ban bool
+	ban     bool
+	preAuth *time.Timer
 }
 
 // newWSLink is a constructor for a new wsLink.
@@ -72,6 +74,19 @@ func newWSLink(addr string, conn ws.Connection) *wsLink {
 		respHandlers: make(map[uint64]*responseHandler),
 	}
 	return c
+}
+
+func (c *wsLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	c.preAuth = time.AfterFunc(10*time.Second, func() {
+		log.Debugf("Hanging up on unauthenticated client %d from %v", c.id, c.IP())
+		c.WSLink.Disconnect()
+	})
+	return c.WSLink.Connect(ctx)
+}
+
+func (c *wsLink) Disconnect() {
+	c.WSLink.Disconnect()
+	c.preAuth.Stop()
 }
 
 // Banish sets the ban flag and closes the client.
@@ -96,6 +111,7 @@ func (c *wsLink) IP() string {
 // link's input loop. dex/ws.(*WsLink).inHandler odes does not run request
 // handlers concurrently with reads.
 func (c *wsLink) Authorized() {
+	c.preAuth.Stop()
 	c.SetReadLimit(readLimitAuthorized)
 }
 
