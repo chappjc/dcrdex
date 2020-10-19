@@ -22,3 +22,4 @@ client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
 wiki
 redist/
+pkg/bin/
