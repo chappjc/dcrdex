@@ -24,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
 
@@ -74,6 +75,7 @@ type BTCNode interface {
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
 	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
+	GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error)
 }
 
 // Backend is a dex backend for Bitcoin or a Bitcoin clone. It has methods for
@@ -404,6 +406,23 @@ func (btc *Backend) CheckAddress(addr string) bool {
 		btc.log.Errorf("CheckAddress error for %s %s: %v", btc.name, addr, err)
 	}
 	return err == nil
+}
+
+// TxData is the raw transaction bytes. SPV clients rebroadcast the transaction
+// bytes to get around not having a mempool to check.
+func (btc *Backend) TxData(coinID []byte) ([]byte, error) {
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+	btcutilTx, err := btc.node.GetRawTransaction(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
+		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+	}
+	return serializeMsgTx(btcutilTx.MsgTx())
 }
 
 // blockInfo returns block information for the verbose transaction data. The
@@ -737,6 +756,10 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 			pkScript: pkScript,
 		})
 	}
+	rawTx, err := hex.DecodeString(verboseTx.Hex)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding tx hex: %w", err)
+	}
 
 	var feeRate uint64
 	if btc.segwit {
@@ -750,7 +773,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 
 	}
 
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate), nil
+	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate, rawTx), nil
 }
 
 // Get information for an unspent transaction output and it's transaction.
@@ -1038,3 +1061,14 @@ func feeRate(node BTCNode) (uint64, error) {
 	}
 	return satPerB, nil
 }
+
+// serializeMsgTx serializes the wire.MsgTx.
+func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
+	err := msgTx.Serialize(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
