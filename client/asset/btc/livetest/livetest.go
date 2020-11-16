@@ -278,7 +278,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, err := auditCoin.Confirmations()
+		confs, err := auditCoin.Confirmations(context.TODO())
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -330,7 +330,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = swapReceipt.Coin().Confirmations()
+	_, err = swapReceipt.Coin().Confirmations(context.TODO())
 	if err == nil {
 		t.Fatalf("error getting confirmations. has swap output been spent?")
 	}

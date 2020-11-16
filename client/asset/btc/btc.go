@@ -204,7 +204,7 @@ func (op *output) Value() uint64 {
 // Confirmations always pulls the block information fresh from the block chain,
 // and will return an error if the output has been spent. Part of the
 // asset.Coin interface.
-func (op *output) Confirmations() (uint32, error) {
+func (op *output) Confirmations(_ context.Context) (uint32, error) {
 	txOut, err := op.node.GetTxOut(op.txHash(), op.vout(), true)
 	if err != nil {
 		return 0, fmt.Errorf("error finding coin: %w", err)

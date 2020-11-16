@@ -4,6 +4,7 @@
 package asset
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,6 +19,7 @@ const CoinNotFoundError = dex.ErrorKind("coin not found")
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
 	dex.Runner
+	Ready() <-chan struct{} // consider adding to dex.Runner
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
@@ -69,11 +71,7 @@ type Coin interface {
 	// ready to spend. An unmined transaction should have zero confirmations. A
 	// transaction in the current best block should have one confirmation. A
 	// negative number can be returned if error is not nil.
-	//
-	// TODO: This really must get a timeout, and a short one, as the Swapper
-	// will block at inconvenient times. The timeout can be at the RPC client
-	// level or a wrapper around the underlying RPC calls
-	Confirmations() (int64, error)
+	Confirmations(context.Context) (int64, error)
 	// ID is the coin ID.
 	ID() []byte
 	// TxID is a transaction identifier for the coin.

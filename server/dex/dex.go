@@ -358,6 +358,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		})
 	}
 
+	for _, ba := range backedAssets {
+		<-ba.Backend.Ready()
+	}
+
 	// Ensure their is a DCR asset backend.
 	if dcrBackend == nil {
 		abort()

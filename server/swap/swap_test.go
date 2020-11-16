@@ -419,9 +419,14 @@ func (a *TAsset) InitTxSizeBase() uint32                          { return 66 }
 func (a *TAsset) FeeRate() (uint64, error)                        { return 10, nil }
 func (a *TAsset) CheckAddress(string) bool                        { return true }
 func (a *TAsset) Run(context.Context)                             {}
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool     { return true }
-func (a *TAsset) VerifyUnspentCoin(coinID []byte) error           { return nil }
-func (a *TAsset) Synced() (bool, error)                           { return true, nil }
+func (a *TAsset) Ready() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool { return true }
+func (a *TAsset) VerifyUnspentCoin(coinID []byte) error       { return nil }
+func (a *TAsset) Synced() (bool, error)                       { return true, nil }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()
@@ -462,7 +467,7 @@ type TCoin struct {
 	lockTime  time.Time
 }
 
-func (coin *TCoin) Confirmations() (int64, error) {
+func (coin *TCoin) Confirmations(context.Context) (int64, error) {
 	coin.mtx.RLock()
 	defer coin.mtx.RUnlock()
 	return coin.confs, coin.confsErr

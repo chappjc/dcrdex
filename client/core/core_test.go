@@ -446,7 +446,7 @@ func (c *tCoin) Value() uint64 {
 	return c.val
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 	c.confsMtx.RLock()
 	defer c.confsMtx.RUnlock()
 	return c.confs, c.confsErr

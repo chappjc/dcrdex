@@ -179,7 +179,7 @@ type Coin interface {
 	Value() uint64
 	// Confirmations is the number of confirmations on this Coin's block. If the
 	// coin becomes spent, Confirmations should return an error.
-	Confirmations() (uint32, error)
+	Confirmations(ctx context.Context) (uint32, error)
 }
 
 // Coins a collection of coins as returned by Fund.

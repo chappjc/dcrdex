@@ -362,6 +362,11 @@ func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }
 func (b *TBackend) Run(context.Context) {}
+func (b *TBackend) Ready() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
 func (b *TBackend) ValidateCoinID(coinID []byte) (string, error) {
 	return "", nil
 }
@@ -394,7 +399,7 @@ var utxoAuthErr error
 var utxoConfsErr error
 var utxoConfs int64 = 2
 
-func (u *tUTXO) Confirmations() (int64, error) { return utxoConfs, utxoConfsErr }
+func (u *tUTXO) Confirmations(context.Context) (int64, error) { return utxoConfs, utxoConfsErr }
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
