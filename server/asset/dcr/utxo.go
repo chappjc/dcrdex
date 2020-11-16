@@ -15,8 +15,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrutil/v2"
-	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 )
 
 const ErrReorgDetected = dex.ErrorKind("reorg detected")
@@ -136,7 +135,7 @@ func (input *Input) String() string {
 func (input *Input) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := input.confirmations(ctx, false)
 	if errors.Is(err, ErrReorgDetected) {
-		newInput, err := input.dcr.input(ctx, &input.tx.hash, input.vin)
+		newInput, err := input.dcr.input(&input.tx.hash, input.vin)
 		if err != nil {
 			return -1, fmt.Errorf("input block is not mainchain")
 		}
@@ -211,7 +210,7 @@ var _ asset.Contract = (*Contract)(nil)
 func (output *Output) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := output.confirmations(ctx, false)
 	if errors.Is(err, ErrReorgDetected) {
-		newOut, err := output.dcr.output(ctx, &output.tx.hash, output.vout, output.redeemScript)
+		newOut, err := output.dcr.output(&output.tx.hash, output.vout, output.redeemScript)
 		if err != nil {
 			return -1, fmt.Errorf("output block is not mainchain")
 		}
@@ -316,7 +315,7 @@ func (utxo *UTXO) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := utxo.confirmations(ctx, !utxo.scriptType.IsStake())
 	if errors.Is(err, ErrReorgDetected) {
 		// See if we can find the utxo in another block.
-		newUtxo, err := utxo.dcr.utxo(ctx, &utxo.tx.hash, utxo.vout, utxo.redeemScript)
+		newUtxo, err := utxo.dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
 		if err != nil {
 			return -1, fmt.Errorf("utxo block is not mainchain")
 		}
@@ -352,13 +351,13 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 				}
 				var sigType dcrec.SignatureType
 				switch a := addr.(type) {
-				case *dcrutilv3.AddressPubKeyHash:
+				case *dcrutil.AddressPubKeyHash:
 					sigType = a.DSA()
-				case *dcrutilv3.AddressSecpPubKey:
+				case *dcrutil.AddressSecpPubKey:
 					sigType = dcrec.STEcdsaSecp256k1
-				case *dcrutilv3.AddressEdwardsPubKey:
+				case *dcrutil.AddressEdwardsPubKey:
 					sigType = dcrec.STEd25519
-				case *dcrutilv3.AddressSecSchnorrPubKey:
+				case *dcrutil.AddressSecSchnorrPubKey:
 					sigType = dcrec.STSchnorrSecp256k1
 				default:
 					return nil, fmt.Errorf("unsupported signature type")

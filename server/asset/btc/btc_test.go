@@ -751,6 +751,7 @@ func testBackend(segwit bool) (*Backend, func()) {
 		btc.Run(ctx)
 		wg.Done()
 	}()
+	<-btc.Ready()
 	return btc, shutdown
 }
 
@@ -816,7 +817,7 @@ func TestUTXOs(t *testing.T) {
 	// Overwrite the test blockchain transaction details.
 	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
 	// "mining" the block should cause a reorg.
-	confs, err := utxo.Confirmations()
+	confs, err := utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
 	}
@@ -877,7 +878,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 5 - received error for utxo")
 	}
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 5 - received error before reorg")
 	}
@@ -886,13 +887,13 @@ func TestUTXOs(t *testing.T) {
 	// return it.
 	testDeleteTxOut(txHash, msg.vout)
 	time.Sleep(blockPollDelay)
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err == nil {
 		t.Fatalf("case 5 - received no error for orphaned transaction")
 	}
 	// Now put it back in mempool and check again.
 	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 5 - error checking confirmations on orphaned transaction back in mempool: %v", err)
 	}
@@ -917,7 +918,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 6 - received error for utxo: %v", err)
 	}
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 6 - error getting confirmations: %v", err)
 	}
@@ -1103,7 +1104,7 @@ func testRedemption(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatalf("Redemption error: %v", err)
 	}
-	confs, err := redemption.Confirmations()
+	confs, err := redemption.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("redemption Confirmations error: %v", err)
 	}
@@ -1140,7 +1141,7 @@ func testRedemption(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatalf("Redemption with confs error: %v", err)
 	}
-	confs, err = redemption.Confirmations()
+	confs, err = redemption.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("redemption with confs Confirmations error: %v", err)
 	}
@@ -1272,7 +1273,7 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("utxo error 1: %v", err)
 	}
-	confs, err := utxo.Confirmations()
+	confs, err := utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error: %v", err)
 	}
@@ -1283,7 +1284,7 @@ func TestReorg(t *testing.T) {
 	// Orphan the block and move the transaction to mempool.
 	btc.blockCache.reorg(int64(ancestorHeight))
 	testAddTxOut(msg.tx, 0, txHash, nil, 0, 0)
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error after reorg: %v", err)
 	}
@@ -1308,7 +1309,7 @@ func TestReorg(t *testing.T) {
 	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(ancestorHeight+1), 1)
 	testAddBlockVerbose(newBlockHash, ancestorHash, 1, ancestorHeight+1)
 	time.Sleep(blockPollDelay)
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error after reorg to lower block: %v", err)
 	}

@@ -213,7 +213,7 @@ func marketSubSysName(name string) string {
 	return fmt.Sprintf("Market[%s]", name)
 }
 
-func (dm *DEX) handleDEXConfig(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
 
@@ -356,6 +356,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			SwapSizeBase: uint64(be.InitTxSizeBase()),
 			SwapConf:     uint16(assetConf.SwapConf),
 		})
+	}
+
+	for _, ba := range backedAssets {
+		<-ba.Backend.Ready()
 	}
 
 	// Ensure their is a DCR asset backend.

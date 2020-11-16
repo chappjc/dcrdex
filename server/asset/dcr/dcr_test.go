@@ -27,9 +27,8 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/schnorr"
-	"github.com/decred/dcrd/dcrutil/v2"
-	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
-	"github.com/decred/dcrd/hdkeychain/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
@@ -188,14 +187,14 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 
 const optimalFeeRate uint64 = 22
 
-func (*testNode) EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
+func (*testNode) EstimateSmartFee(_ context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
 	optimalRate := float64(optimalFeeRate) * 1e-5
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return optimalRate, nil // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 }
 
 // Part of the dcrNode interface.
-func (*testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
+func (*testNode) GetTxOut(_ context.Context, txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
 	outID := txOutID(txHash, index)
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
@@ -205,18 +204,18 @@ func (*testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainj
 }
 
 // Part of the dcrNode interface.
-func (*testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
+func (*testNode) GetRawTransactionVerbose(_ context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	tx, found := testChain.txRaws[*txHash]
 	if !found {
-		return nil, fmt.Errorf("test transaction not found\n")
+		return nil, fmt.Errorf("test transaction not found")
 	}
 	return tx, nil
 }
 
 // Part of the dcrNode interface.
-func (*testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+func (*testNode) GetBlockVerbose(_ context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	block, found := testChain.blocks[*blockHash]
@@ -227,7 +226,7 @@ func (*testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*ch
 }
 
 // Part of the dcrNode interface.
-func (*testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+func (*testNode) GetBlockHash(_ context.Context, blockHeight int64) (*chainhash.Hash, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	hash, found := testChain.hashes[blockHeight]
@@ -238,7 +237,7 @@ func (*testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 }
 
 // Part of the dcrNode interface.
-func (*testNode) GetBestBlockHash() (*chainhash.Hash, error) {
+func (*testNode) GetBestBlockHash(context.Context) (*chainhash.Hash, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	if len(testChain.hashes) == 0 {
@@ -253,7 +252,7 @@ func (*testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 	return testChain.hashes[bestHeight], nil
 }
 
-func (t *testNode) GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error) {
+func (t *testNode) GetBlockChainInfo(context.Context) (*chainjson.GetBlockChainInfoResult, error) {
 	if t.blockchainInfoErr != nil {
 		return nil, t.blockchainInfoErr
 	}
@@ -445,7 +444,7 @@ func newP2PKHScript(sigType dcrec.SignatureType) ([]byte, *testAuth) {
 	default:
 		fmt.Printf("NewAddressPubKeyHash unknown sigType")
 	}
-	addr, err := dcrutilv3.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
+	addr, err := dcrutil.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
 	if err != nil {
 		fmt.Printf("NewAddressPubKeyHash error: %v\n", err)
 		return nil, nil
@@ -709,6 +708,7 @@ func testBackend() (*Backend, func()) {
 		dcr.Run(ctx)
 		wg.Done()
 	}()
+	<-dcr.Ready()
 	return dcr, shutdown
 }
 
@@ -782,7 +782,7 @@ func TestUTXOs(t *testing.T) {
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
 	// Overwrite the test blockchain transaction details.
 	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
-	confs, err := utxo.Confirmations()
+	confs, err := utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
 	}
@@ -855,7 +855,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 5 - error adding to block cache: %v", err)
 	}
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err == nil {
 		t.Fatalf("case 5 - block not detected as invalid after stakeholder invalidation")
 	}
@@ -910,7 +910,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo")
 	}
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 7 - received error before reorg")
 	}
@@ -921,7 +921,7 @@ func TestUTXOs(t *testing.T) {
 	testChainMtx.Lock()
 	delete(testChain.txOuts, txOutID(txHash, msg.vout))
 	testChainMtx.Unlock()
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err == nil {
 		t.Fatalf("case 7 - received no error for orphaned transaction")
 	}
@@ -942,7 +942,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	dcr.blockCache.add(testChain.blocks[*betterHash])
 	testAddTxOut(msg.tx, msg.vout, txHash, betterHash, int64(txHeight), 1)
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error after reorg: %v", err)
 	}
@@ -954,7 +954,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	dcr.blockCache.add(testChain.blocks[*evenBetter])
 	testAddTxOut(msg.tx, msg.vout, txHash, evenBetter, 0, 0)
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error for mempool tx after reorg")
 	}
@@ -979,7 +979,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 9 - received error for utxo: %v", err)
 	}
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 9 - error getting confirmations: %v", err)
 	}
@@ -1133,7 +1133,7 @@ func TestRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Redemption error: %v", err)
 	}
-	confs, err := redemption.Confirmations()
+	confs, err := redemption.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("redemption Confirmations error: %v", err)
 	}
@@ -1170,7 +1170,7 @@ func TestRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Redemption with confs error: %v", err)
 	}
-	confs, err = redemption.Confirmations()
+	confs, err = redemption.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("redemption with confs Confirmations error: %v", err)
 	}
@@ -1195,7 +1195,7 @@ func TestReorg(t *testing.T) {
 		for h := uint32(0); h <= tipHeight; h++ {
 			blockHash := testAddBlockVerbose(nil, int64(tipHeight-h+1), h, 1)
 			// force dcr to get and cache the block
-			_, err := dcr.getDcrBlock(blockHash)
+			_, err := dcr.getDcrBlock(context.Background(), blockHash)
 			if err != nil {
 				t.Fatalf("getDcrBlock: %v", err)
 			}
@@ -1281,7 +1281,7 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("utxo error: %v", err)
 	}
-	confs, err := utxo.Confirmations()
+	confs, err := utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error: %v", err)
 	}
@@ -1292,7 +1292,7 @@ func TestReorg(t *testing.T) {
 	// Orphan the block and move the transaction to mempool.
 	dcr.blockCache.reorg(int64(tipHeight - 2))
 	testAddTxOut(msg.tx, 0, txHash, nil, 0, 0)
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error after reorg: %v", err)
 	}
@@ -1316,8 +1316,8 @@ func TestReorg(t *testing.T) {
 	newBlockHash := randomHash()
 	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(reorgHeight+1), 1)
 	testAddBlockVerbose(newBlockHash, 1, reorgHeight+1, 1)
-	dcr.getDcrBlock(newBlockHash) // Force blockCache update
-	confs, err = utxo.Confirmations()
+	dcr.getDcrBlock(context.Background(), newBlockHash) // Force blockCache update
+	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error after reorg to lower block: %v", err)
 	}
@@ -1491,12 +1491,8 @@ func TestValidateXPub(t *testing.T) {
 		t.Errorf("no error for extended private key")
 	}
 
-	xpub, err := master.Neuter()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// succeed for public key
+	xpub := master.Neuter()
 	xpubStr := xpub.String()
 	if err = be.ValidateXPub(xpubStr); err != nil {
 		t.Error(err)
@@ -1512,7 +1508,7 @@ func TestValidateXPub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to generate master extended key: %v", err)
 	}
-	xpubTestnet, _ := masterTestnet.Neuter()
+	xpubTestnet := masterTestnet.Neuter()
 	if err = be.ValidateXPub(xpubTestnet.String()); err == nil {
 		t.Errorf("no error for invalid wrong network")
 	}

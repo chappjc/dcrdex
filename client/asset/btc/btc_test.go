@@ -313,7 +313,7 @@ func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []btcjson.Vin) *btcjso
 	return tx
 }
 
-func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte, error) {
+func makeTxHex(pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte, error) {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	for _, input := range inputs {
 		prevOutHash, err := chainhash.NewHashFromStr(input.Txid)
@@ -731,9 +731,9 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
-func (c *tCoin) String() string                 { return hex.EncodeToString(c.id) }
-func (c *tCoin) Value() uint64                  { return 100 }
-func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
+func (c *tCoin) String() string                                { return hex.EncodeToString(c.id) }
+func (c *tCoin) Value() uint64                                 { return 100 }
+func (c *tCoin) Confirmations(context.Context) (uint32, error) { return 2, nil }
 
 func TestReturnCoins(t *testing.T) {
 	wallet, node, shutdown := tNewWallet(true)
@@ -1630,7 +1630,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	inputs := []btcjson.Vin{makeRPCVin(otherTxid, 0, otherSigScript, otherWitness)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
 	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
-	txHex, err := makeTxHex(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs)
+	txHex, err := makeTxHex([]dex.Bytes{otherScript, pkScript}, inputs)
 	if err != nil {
 		t.Fatalf("error generating hex for contract tx: %v", err)
 	}
@@ -1712,7 +1712,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	node.blockchainMtx.Unlock()
 
 	// Wrong script type for contract output
-	getTxRes.Hex, err = makeTxHex(contractTxid, []dex.Bytes{otherScript, otherScript}, inputs)
+	getTxRes.Hex, err = makeTxHex([]dex.Bytes{otherScript, otherScript}, inputs)
 	if err != nil {
 		t.Fatalf("makeTxHex: %v", err)
 	}

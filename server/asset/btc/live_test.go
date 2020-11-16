@@ -81,6 +81,7 @@ func TestMain(m *testing.M) {
 			dexAsset.Run(ctx)
 			wg.Done()
 		}()
+		<-dexAsset.Ready()
 
 		return m.Run()
 	}

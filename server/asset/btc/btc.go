@@ -81,6 +81,7 @@ type btcNode interface {
 // cache of block data for quick lookups. Backend implements asset.Backend, so
 // provides exported methods for DEX-related blockchain info.
 type Backend struct {
+	ready chan struct{}
 	// The asset name (e.g. btc), primarily for logging purposes.
 	name string
 	// segwit should be set to true for blockchains that support segregated
@@ -180,7 +181,7 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 // output from a non-coinbase transaction is spendable immediately. Coinbase
 // outputs are only spendable after CoinbaseMaturity confirmations. Pubkey
 // scripts can be P2PKH or P2SH. Multi-sig P2SH redeem scripts are supported.
-func (btc *Backend) Contract(_ context.Context, coinID []byte, redeemScript []byte) (asset.Contract, error) {
+func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
@@ -210,7 +211,7 @@ func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
 }
 
 // Synced is true if the blockchain is ready for action.
-func (btc *Backend) Synced(_ context.Context) (bool, error) {
+func (btc *Backend) Synced() (bool, error) {
 	chainInfo, err := btc.getBlockchainInfo()
 	if err != nil {
 		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
@@ -219,7 +220,7 @@ func (btc *Backend) Synced(_ context.Context) (bool, error) {
 }
 
 // Redemption is an input that redeems a swap contract.
-func (btc *Backend) Redemption(_ context.Context, redemptionID, contractID []byte) (asset.Coin, error) {
+func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding redemption coin ID %x: %w", txHash, err)
@@ -239,7 +240,7 @@ func (btc *Backend) Redemption(_ context.Context, redemptionID, contractID []byt
 }
 
 // FundingCoin is an unspent output.
-func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
@@ -273,12 +274,12 @@ func (btc *Backend) ValidateContract(contract []byte) error {
 // VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
 // retrieving the corresponding UTXO. If the coin is not found or no longer
 // unspent, an asset.CoinNotFoundError is returned.
-func (dcr *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
+func (btc *Backend) VerifyUnspentCoin(coinID []byte) error {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
+	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, err)
 	}
@@ -317,7 +318,7 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.
-func (btc *Backend) FeeRate(_ context.Context) (uint64, error) {
+func (btc *Backend) FeeRate() (uint64, error) {
 	feeResult, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
@@ -346,6 +347,7 @@ func (btc *Backend) CheckAddress(addr string) bool {
 // Create a *Backend and start the block monitor loop.
 func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
 	btc := &Backend{
+		ready:       make(chan struct{}),
 		name:        name,
 		blockCache:  newBlockCache(),
 		blockChans:  make(map[chan *asset.BlockUpdate]struct{}),
@@ -791,15 +793,23 @@ func (btc *Backend) auditContract(contract *Contract) error {
 	return nil
 }
 
+// Ready returns a channel that is closed when Run completes its initialization
+// tasks and Core becomes ready for use.
+func (btc *Backend) Ready() <-chan struct{} {
+	return btc.ready
+}
+
 // Run is responsible for best block polling and checking the application
 // context to trigger a clean shutdown.
 func (btc *Backend) Run(ctx context.Context) {
 	defer btc.shutdown()
 
-	_, err := btc.FeeRate(ctx)
+	_, err := btc.FeeRate()
 	if err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
+
+	close(btc.ready)
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
