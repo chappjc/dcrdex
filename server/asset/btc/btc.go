@@ -263,7 +263,7 @@ func (btc *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 	var utxo *UTXO
 	select {
 	case <-ctx.Done():
-		err = context.DeadlineExceeded
+		err = asset.ErrRequestTimeout
 	case r := <-res:
 		utxo, err = r.UTXO, r.error
 	}

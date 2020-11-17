@@ -78,6 +78,15 @@ type dcrNode interface {
 	GetBlockChainInfo(context.Context) (*chainjson.GetBlockChainInfoResult, error)
 }
 
+// The rpcclient package functions will return a rpcclient.ErrRequestCanceled
+// error if the context is canceled. Translate these to asset.ErrRequestTimeout.
+func translateRPCCancelErr(err error) error {
+	if errors.Is(err, rpcclient.ErrRequestCanceled) {
+		err = asset.ErrRequestTimeout
+	}
+	return err
+}
+
 // Backend is an asset backend for Decred. It has methods for fetching output
 // information and subscribing to block updates. It maintains a cache of block
 // data for quick lookups. Backend implements asset.Backend, so provides
@@ -195,7 +204,7 @@ func (dcr *Backend) FeeRate() (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
 	dcrPerKB, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
 	if err != nil {
-		return 0, err
+		return 0, translateRPCCancelErr(err)
 	}
 	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB)
 	if err != nil {
@@ -258,7 +267,7 @@ func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
 func (dcr *Backend) Synced() (bool, error) {
 	chainInfo, err := dcr.node.GetBlockChainInfo(dcr.ctx)
 	if err != nil {
-		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
+		return false, fmt.Errorf("GetBlockChainInfo error: %w", translateRPCCancelErr(err))
 	}
 	return !chainInfo.InitialBlockDownload && chainInfo.Headers-chainInfo.Blocks <= 1, nil
 }
@@ -345,7 +354,7 @@ func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 	}
 	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
-		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, err)
+		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, translateRPCCancelErr(err))
 	}
 	if txOut == nil {
 		return asset.CoinNotFoundError
@@ -399,6 +408,8 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			err = asset.CoinNotFoundError
+		} else {
+			err = translateRPCCancelErr(err)
 		}
 		return
 	}
@@ -598,7 +609,7 @@ out:
 			tip := dcr.blockCache.tip()
 			bestHash, err := dcr.node.GetBestBlockHash(ctx)
 			if err != nil {
-				sendErr(asset.NewConnectionError("error retrieving best block: %v", err))
+				sendErr(asset.NewConnectionError("error retrieving best block: %w", translateRPCCancelErr(err)))
 				continue
 			}
 			if *bestHash == tip.hash {
@@ -608,13 +619,13 @@ out:
 			best := bestHash.String()
 			block, err := dcr.node.GetBlockVerbose(ctx, bestHash, false)
 			if err != nil {
-				sendErrFmt("error retrieving block %s: %v", best, err)
+				sendErrFmt("error retrieving block %s: %w", best, translateRPCCancelErr(err))
 				continue
 			}
 			// If this doesn't build on the best known block, look for a reorg.
 			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
 			if err != nil {
-				sendErrFmt("error parsing previous hash %s: %v", block.PreviousHash, err)
+				sendErrFmt("error parsing previous hash %s: %w", block.PreviousHash, err)
 				continue
 			}
 			// If it builds on the best block or the cache is empty, it's good to add.
@@ -635,7 +646,7 @@ out:
 				}
 				iBlock, err := dcr.node.GetBlockVerbose(ctx, iHash, false)
 				if err != nil {
-					sendErrFmt("error retrieving block %s: %v", iHash, err)
+					sendErrFmt("error retrieving block %s: %w", iHash, translateRPCCancelErr(err))
 					break
 				}
 				if iBlock.Confirmations > -1 {
@@ -648,8 +659,8 @@ out:
 				reorgHeight = iBlock.Height
 				iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
 				if err != nil {
-					sendErrFmt("error decoding previous hash %s for block %s: %v",
-						iBlock.PreviousHash, iHash.String(), err)
+					sendErrFmt("error decoding previous hash %s for block %s: %w",
+						iBlock.PreviousHash, iHash.String(), translateRPCCancelErr(err))
 					// Some blocks on the side chain may not be flagged as
 					// orphaned, but still proceed, flagging the ones we have
 					// identified and adding the new best block to the cache and
@@ -779,7 +790,7 @@ func (dcr *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
 		if isTxNotFoundErr(err) {
 			return nil, 0, asset.CoinNotFoundError
 		}
-		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
 	tx, err := dcr.transaction(txHash, verboseTx)
 	if err != nil {
@@ -888,7 +899,8 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
 	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err) // TODO: make RPC error type for client message sanitization
+		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w",
+			txHash, vout, translateRPCCancelErr(err))
 	}
 	if txOut == nil {
 		return nil, nil, asset.CoinNotFoundError
@@ -909,7 +921,7 @@ func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vo
 	}
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
 	return txOut, verboseTx, pkScript, nil
 }
@@ -932,7 +944,7 @@ func (dcr *Backend) getDcrBlock(ctx context.Context, blockHash *chainhash.Hash) 
 	}
 	blockVerbose, err := dcr.node.GetBlockVerbose(ctx, blockHash, false)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
 	}
 	return dcr.blockCache.add(blockVerbose)
 }

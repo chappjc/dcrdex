@@ -311,7 +311,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				if errors.Is(err, asset.CoinNotFoundError) {
 					return true, nil
 				}
-				if errors.Is(err, context.DeadlineExceeded) {
+				if errors.Is(err, asset.ErrRequestTimeout) {
 					log.Errorf("Deadline exceeded attempting to verify funding coin %v (%s). Will try again.",
 						coin.ID, fundingAsset.Symbol)
 					return true, nil
@@ -499,7 +499,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 				if errors.Is(err, asset.CoinNotFoundError) {
 					return true, nil
 				}
-				if errors.Is(err, context.DeadlineExceeded) {
+				if errors.Is(err, asset.ErrRequestTimeout) {
 					log.Errorf("Deadline exceeded attempting to verify funding coin %v (%s). Will try again.",
 						coin.ID, fundingAsset.Symbol)
 					return true, nil
@@ -860,8 +860,8 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 	return b
 }
 
-// fmtCoinID formats the coin ID by asset. If an error is encounted, the coinID
-// string returned hex-encoded and prepended with "unparsed:".
+// fmtCoinID formats the coin ID by asset. If an error is encountered, the
+// coinID string returned hex-encoded and prepended with "unparsed:".
 func fmtCoinID(symbol string, coinID []byte) string {
 	strID, err := asset.DecodeCoinID(symbol, coinID)
 	if err != nil {

@@ -14,7 +14,10 @@ import (
 // CoinNotFoundError is to be returned from Contract, Redemption, and
 // FundingCoin when the specified transaction cannot be found. Used by the
 // server to handle network latency.
-const CoinNotFoundError = dex.ErrorKind("coin not found")
+const (
+	CoinNotFoundError = dex.ErrorKind("coin not found")
+	ErrRequestTimeout = dex.ErrorKind("request timeout")
+)
 
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
