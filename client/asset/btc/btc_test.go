@@ -1969,21 +1969,21 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin id
-	_, err := wallet.Confirmations(randBytes(35))
+	_, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	// listunspent error
 	node.rawErr[methodGetTransaction] = tErr
-	_, err = wallet.Confirmations(coinID)
+	_, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for listunspent error")
 	}
 	node.rawErr[methodGetTransaction] = nil
 
 	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{})
-	_, err = wallet.Confirmations(coinID)
+	_, err = wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}

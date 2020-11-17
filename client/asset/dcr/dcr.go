@@ -531,7 +531,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 	// Initialize the best block.
 	dcr.tipMtx.Lock()
-	dcr.currentTip, err = dcr.getBestBlock()
+	dcr.currentTip, err = dcr.getBestBlock(ctx)
 	dcr.tipMtx.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
@@ -1814,7 +1814,7 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 
 // Confirmations gets the number of confirmations for the specified coin ID.
 // The coin must be known to the wallet, but need not be unspent.
-func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
+func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (uint32, error) {
 	// Could check with gettransaction first, figure out the tree, and look for a
 	// redeem script with listscripts, but the listunspent entry has all the
 	// necessary fields already.
@@ -1822,7 +1822,7 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	tx, err := dcr.node.GetTransaction(dcr.ctx, txHash)
+	tx, err := dcr.node.GetTransaction(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return 0, asset.CoinNotFoundError
@@ -2299,9 +2299,11 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
 func (dcr *ExchangeWallet) checkForNewBlocks() {
-	newTip, err := dcr.getBestBlock()
+	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
+	defer cancel()
+	newTip, err := dcr.getBestBlock(ctx)
 	if err != nil {
-		dcr.tipChange(fmt.Errorf("failed to get best block from DCR node"))
+		dcr.tipChange(fmt.Errorf("failed to get best block from DCR node: %w", err))
 		return
 	}
 
@@ -2382,8 +2384,8 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	}
 }
 
-func (dcr *ExchangeWallet) getBestBlock() (*block, error) {
-	hash, height, err := dcr.node.GetBestBlock(dcr.ctx)
+func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
+	hash, height, err := dcr.node.GetBestBlock(ctx)
 	if err != nil {
 		return nil, err
 	}

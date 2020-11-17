@@ -253,7 +253,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	confCoin := receipts[0].Coin()
 	checkConfs := func(n uint32) {
 		t.Helper()
-		confs, err := rig.gamma().Confirmations(confCoin.ID())
+		confs, err := rig.gamma().Confirmations(context.Background(), confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}

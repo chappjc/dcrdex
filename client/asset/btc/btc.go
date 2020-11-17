@@ -1861,7 +1861,7 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 
 // Confirmations gets the number of confirmations for the specified coin ID.
 // The coin must be known to the wallet, but need not be unspent.
-func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
+func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (uint32, error) {
 	txHash, _, err := decodeCoinID(id)
 	if err != nil {
 		return 0, err

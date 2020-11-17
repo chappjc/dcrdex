@@ -152,10 +152,11 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	wallet := unconnectedWallet(walletCfg, &Config{}, tLogger)
 	wallet.node = client
+	wallet.ctx = walletCtx
 
 	// Initialize the best block.
 	wallet.tipMtx.Lock()
-	wallet.currentTip, _ = wallet.getBestBlock()
+	wallet.currentTip, _ = wallet.getBestBlock(walletCtx)
 	wallet.tipMtx.Unlock()
 
 	go wallet.monitorBlocks(walletCtx)
@@ -1732,21 +1733,21 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, err := wallet.Confirmations(randBytes(35))
+	_, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	// listunspent error
 	node.walletTxErr = tErr
-	_, err = wallet.Confirmations(coinID)
+	_, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for listunspent error")
 	}
 	node.walletTxErr = nil
 
 	node.walletTx = &walletjson.GetTransactionResult{}
-	_, err = wallet.Confirmations(coinID)
+	_, err = wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}

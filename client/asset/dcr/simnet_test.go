@@ -270,7 +270,7 @@ func runTest(t *testing.T, splitTx bool) {
 	confCoin := receipts[0].Coin()
 	checkConfs := func(n uint32) {
 		t.Helper()
-		confs, err := rig.beta().Confirmations(confCoin.ID())
+		confs, err := rig.beta().Confirmations(tCtx, confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
