@@ -1346,7 +1346,7 @@ func TestAuxiliary(t *testing.T) {
 	}
 	verboseTx.Vout = append(verboseTx.Vout, vout)
 
-	utxo, err := btc.FundingCoin(coinID, nil)
+	utxo, err := btc.FundingCoin(context.Background(), coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

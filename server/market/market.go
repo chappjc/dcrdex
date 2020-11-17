@@ -57,7 +57,7 @@ const (
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
-	CheckUnspent(asset uint32, coinID []byte) error
+	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 	ChainsSynced(base, quote uint32) (bool, error)
 }
@@ -169,7 +169,7 @@ ordersLoop:
 			assetID = base
 		}
 		for i := range lo.Coins {
-			err = swapper.CheckUnspent(assetID, lo.Coins[i])
+			err = swapper.CheckUnspent(context.Background(), assetID, lo.Coins[i]) // no timeout
 			if err == nil {
 				continue
 			}
@@ -635,18 +635,24 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, e
 }
 
 func (m *Market) checkUnfilledOrders(assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
+	checkUnspent := func(assetID uint32, coinID []byte) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return m.swapper.CheckUnspent(ctx, assetID, coinID)
+	}
+
 orders:
 	for _, lo := range unfilled {
 		log.Tracef("Checking %d funding coins for order %v", len(lo.Coins), lo.ID())
 		for i := range lo.Coins {
-			err := m.swapper.CheckUnspent(assetID, lo.Coins[i])
+			err := checkUnspent(assetID, lo.Coins[i])
 			if err == nil {
 				continue // unspent, check next coin
 			}
 
 			if !errors.Is(err, asset.CoinNotFoundError) {
-				// other failure (coinID decode, RPC, etc.)
-				log.Errorf("unexpected error checking coinID %v for order %v: %v",
+				// other failure (timeout, coinID decode, RPC, etc.)
+				log.Errorf("Unexpected error checking coinID %v for order %v: %v",
 					lo.Coins[i], lo, err)
 				continue orders
 				// NOTE: This does not revoke orders from storage since this is

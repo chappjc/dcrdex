@@ -2169,13 +2169,13 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 // CheckUnspent attempts to verify a coin ID for a given asset by retrieving the
 // corresponding asset.Coin. If the coin is not found or spent, an
 // asset.CoinNotFoundError is returned.
-func (s *Swapper) CheckUnspent(asset uint32, coinID []byte) error {
+func (s *Swapper) CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error {
 	backend := s.coins[asset]
 	if backend == nil {
 		return fmt.Errorf("unknown asset %d", asset)
 	}
 
-	return backend.Backend.VerifyUnspentCoin(coinID)
+	return backend.Backend.VerifyUnspentCoin(ctx, coinID)
 }
 
 // LockOrdersCoins locks the backing coins for the provided orders.

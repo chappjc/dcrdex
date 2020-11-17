@@ -765,7 +765,7 @@ func TestUTXOs(t *testing.T) {
 	// Set the value of this one.
 	txout.Value = 2.0
 	// There is no block info to add, since this is a mempool transaction
-	utxo, err := dcr.utxo(txHash, msg.vout, nil)
+	utxo, err := dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
@@ -805,7 +805,7 @@ func TestUTXOs(t *testing.T) {
 		txHash = randomHash()
 		msg = testMsgTxRegular(sigType)
 		testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-		utxo, err = dcr.utxo(txHash, msg.vout, nil)
+		utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 		if err != nil {
 			t.Fatalf("case 2 - unexpected error for sig type %d: %v", int(sigType), err)
 		}
@@ -817,7 +817,7 @@ func TestUTXOs(t *testing.T) {
 
 	// CASE 3: A UTXO that is invalid because it is non-existent
 	reset()
-	_, err = dcr.utxo(randomHash(), 0, nil)
+	_, err = dcr.utxo(context.Background(), randomHash(), 0, nil)
 	if err == nil {
 		t.Fatalf("case 3 - received no error for a non-existent UTXO")
 	}
@@ -830,7 +830,7 @@ func TestUTXOs(t *testing.T) {
 	// make the script nonsense.
 	msg.tx.TxOut[0].PkScript = []byte{0x00, 0x01, 0x02, 0x03}
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	_, err = dcr.utxo(txHash, msg.vout, nil)
+	_, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 4 - received no error for a UTXO with wrong script type")
 	}
@@ -843,7 +843,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 5 - unexpected error: %v", err)
 	}
@@ -868,7 +868,7 @@ func TestUTXOs(t *testing.T) {
 	immatureHash := testAddBlockVerbose(nil, 2, txHeight, 1)
 	msg = testMsgTxVote()
 	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), 1)
-	_, err = dcr.utxo(txHash, msg.vout, nil)
+	_, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 6 - no error for immature transaction")
 	}
@@ -890,7 +890,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 6 - error adding to maturing block cache: %v", err)
 	}
 	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), int64(txHeight)+maturity-1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 6 - unexpected error after maturing block: %v", err)
 	}
@@ -906,7 +906,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo")
 	}
@@ -933,7 +933,7 @@ func TestUTXOs(t *testing.T) {
 	orphanHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, orphanHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 8 - received error for utxo")
 	}
@@ -970,12 +970,12 @@ func TestUTXOs(t *testing.T) {
 	msgMultiSig := testMsgTxP2SHMofN(1, 2)
 	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
 	// First try to get the UTXO without providing the raw script.
-	_, err = dcr.utxo(txHash, msgMultiSig.vout, nil)
+	_, err = dcr.utxo(context.Background(), txHash, msgMultiSig.vout, nil)
 	if err == nil {
 		t.Fatalf("no error thrown for p2sh utxo when no script was provided")
 	}
 	// Now provide the script.
-	utxo, err = dcr.utxo(txHash, msgMultiSig.vout, msgMultiSig.script)
+	utxo, err = dcr.utxo(context.Background(), txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 9 - received error for utxo: %v", err)
 	}
@@ -998,7 +998,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msgMultiSig = testMsgTxP2SHMofN(2, 2)
 	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msgMultiSig.vout, msgMultiSig.script)
+	utxo, err = dcr.utxo(context.Background(), txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 10 - received error for utxo: %v", err)
 	}
@@ -1028,7 +1028,7 @@ func TestUTXOs(t *testing.T) {
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	// mature the vote
 	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, msg.script)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, msg.script)
 	if err != nil {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
@@ -1055,7 +1055,7 @@ func TestUTXOs(t *testing.T) {
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	// mature the revocation
 	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, msg.script)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, msg.script)
 	if err != nil {
 		t.Fatalf("case 12 - received error for utxo: %v", err)
 	}
@@ -1083,7 +1083,7 @@ func TestUTXOs(t *testing.T) {
 	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
 	txOut := swap.tx.TxOut[0]
 	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(txOut.Value)/1e8, txOut.PkScript))
-	utxo, err = dcr.utxo(txHash, 0, swap.contract)
+	utxo, err = dcr.utxo(context.Background(), txHash, 0, swap.contract)
 	if err != nil {
 		t.Fatalf("case 13 - received error for utxo: %v", err)
 	}
@@ -1277,7 +1277,7 @@ func TestReorg(t *testing.T) {
 
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
 
-	utxo, err := dcr.utxo(txHash, msg.vout, nil)
+	utxo, err := dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("utxo error: %v", err)
 	}
@@ -1305,7 +1305,7 @@ func TestReorg(t *testing.T) {
 	tip, _ = dcr.blockCache.atHeight(tipHeight)
 	testAddBlockVerbose(&tip.hash, 1, tipHeight, 1)
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(context.Background(), txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("utxo error 2: %v", err)
 	}
@@ -1343,7 +1343,7 @@ func TestAuxiliary(t *testing.T) {
 	blockHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	coinID := toCoinID(txHash, msg.vout)
-	utxo, err := dcr.FundingCoin(coinID, nil)
+	utxo, err := dcr.FundingCoin(context.Background(), coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

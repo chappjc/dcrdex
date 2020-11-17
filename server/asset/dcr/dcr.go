@@ -284,12 +284,12 @@ func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 }
 
 // FundingCoin is an unspent output.
-func (dcr *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+func (dcr *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	utxo, err := dcr.utxo(txHash, vout, redeemScript)
+	utxo, err := dcr.utxo(ctx, txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
@@ -338,12 +338,12 @@ func (dcr *Backend) CheckAddress(addr string) bool {
 // VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
 // retrieving the corresponding UTXO. If the coin is not found or no longer
 // unspent, an asset.CoinNotFoundError is returned.
-func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
+func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, true)
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
 		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, err)
 	}
@@ -677,44 +677,9 @@ out:
 	wg.Wait()
 }
 
-// validateTxOut validates an outpoint (txHash:out) by retrieving associated
-// output's pkScript, and if the provided redeemScript is not empty, verifying
-// that the pkScript is a P2SH with a script hash to which the redeem script
-// hashes. This also screens out multi-sig scripts.
-func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
-	_, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
-	if err != nil {
-		return err
-	}
-
-	scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, redeemScript)
-	if scriptType == dexdcr.ScriptUnsupported {
-		return dex.UnsupportedScriptError
-	}
-
-	switch {
-	case scriptType.IsP2SH(): // regular or stake (vsp vote) p2sh
-		if len(redeemScript) == 0 {
-			return fmt.Errorf("no redeem script provided for P2SH pkScript")
-		}
-		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
-		if err != nil {
-			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %w", err)
-		}
-		// Check the script hash against the hash of the redeem script.
-		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
-			return fmt.Errorf("redeem script does not match script hash from P2SH pkScript")
-		}
-	case len(redeemScript) > 0:
-		return fmt.Errorf("redeem script provided for non P2SH pubkey script")
-	}
-
-	return nil
-}
-
 // blockInfo returns block information for the verbose transaction data. The
 // current tip hash is also returned as a convenience.
-func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
+func (dcr *Backend) blockInfo(ctx context.Context, verboseTx *chainjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
 	blockHeight = uint32(verboseTx.BlockHeight)
 	tip := dcr.blockCache.tipHash()
 	if tip != zeroHash {
@@ -728,7 +693,7 @@ func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uin
 			return
 		}
 		var blk *dcrBlock
-		blk, err = dcr.getBlockInfo(dcr.ctx, verboseTx.BlockHash)
+		blk, err = dcr.getBlockInfo(ctx, verboseTx.BlockHash)
 		if err != nil {
 			return
 		}
@@ -739,8 +704,8 @@ func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uin
 }
 
 // Get the UTXO, populating the block data along the way.
-func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
-	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(txHash, vout)
+func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
+	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(ctx, txHash, vout)
 	if err != nil {
 		return nil, err
 	}
@@ -763,7 +728,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		}
 	}
 
-	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
+	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(ctx, verboseTx)
 	if err != nil {
 		return nil, err
 	}
@@ -820,7 +785,7 @@ func (dcr *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
-	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
+	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(dcr.ctx, verboseTx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -920,8 +885,8 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 }
 
 // Get information for an unspent transaction output.
-func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
-	txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, true)
+func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err) // TODO: make RPC error type for client message sanitization
 	}
@@ -937,12 +902,12 @@ func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chain
 
 // Get information for an unspent transaction output, plus the verbose
 // transaction.
-func (dcr *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
-	txOut, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
+func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
+	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	verboseTx, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}

@@ -315,7 +315,7 @@ func (utxo *UTXO) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := utxo.confirmations(ctx, !utxo.scriptType.IsStake())
 	if errors.Is(err, ErrReorgDetected) {
 		// See if we can find the utxo in another block.
-		newUtxo, err := utxo.dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
+		newUtxo, err := utxo.dcr.utxo(ctx, &utxo.tx.hash, utxo.vout, utxo.redeemScript)
 		if err != nil {
 			return -1, fmt.Errorf("utxo block is not mainchain")
 		}

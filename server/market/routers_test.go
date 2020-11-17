@@ -348,7 +348,7 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	return b.utxo(coinID)
 }
-func (b *TBackend) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+func (b *TBackend) FundingCoin(ctx context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	return b.utxo(coinID)
 }
 func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
@@ -375,7 +375,7 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 }
 
 func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
-func (b *TBackend) VerifyUnspentCoin(coinID []byte) error {
+func (b *TBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 	_, err := b.utxo(coinID)
 	return err
 }

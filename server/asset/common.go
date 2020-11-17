@@ -32,7 +32,7 @@ type Backend interface {
 	// FundingCoin returns the unspent coin at the specified location. Coins
 	// with non-standard pkScripts or scripts that require zero signatures to
 	// redeem must return an error.
-	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
+	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
@@ -54,7 +54,7 @@ type Backend interface {
 	// and retrieving the corresponding Coin. If the coin is not found or no
 	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
 	// for more UTXO data.
-	VerifyUnspentCoin(coinID []byte) error
+	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
 	FeeRate() (uint64, error)
 	// Synced should return true when the blockchain is synced and ready for

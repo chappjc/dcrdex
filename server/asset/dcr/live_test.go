@@ -189,7 +189,7 @@ func TestLiveUTXO(t *testing.T) {
 				// Check if its an acceptable script type.
 				scriptTypeOK := scriptType != dexdcr.ScriptUnsupported
 				// Now try to get the UTXO with the Backend
-				utxo, err := dcr.utxo(txHash, uint32(vout), nil)
+				utxo, err := dcr.utxo(ctx, txHash, uint32(vout), nil)
 				// Can't do stakebase or coinbase.
 				// ToDo: Use a custom error and check it.
 				if err == immatureTransactionError {

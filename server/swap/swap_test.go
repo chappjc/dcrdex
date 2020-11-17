@@ -378,7 +378,7 @@ func newTAsset(lbl string) *TAsset {
 	}
 }
 
-func (a *TAsset) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+func (a *TAsset) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.funds, a.fundsErr
@@ -424,9 +424,9 @@ func (a *TAsset) Ready() <-chan struct{} {
 	close(c)
 	return c
 }
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool { return true }
-func (a *TAsset) VerifyUnspentCoin(coinID []byte) error       { return nil }
-func (a *TAsset) Synced() (bool, error)                       { return true, nil }
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool              { return true }
+func (a *TAsset) VerifyUnspentCoin(_ context.Context, coinID []byte) error { return nil }
+func (a *TAsset) Synced() (bool, error)                                    { return true, nil }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()

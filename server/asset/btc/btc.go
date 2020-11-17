@@ -240,15 +240,38 @@ func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 }
 
 // FundingCoin is an unspent output.
-func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+func (btc *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	utxo, err := btc.utxo(txHash, vout, redeemScript)
+
+	// Maybe don't do this, just a test:
+	type utxoRes struct {
+		*UTXO
+		error
+	}
+	res := make(chan *utxoRes)
+	go func() {
+		utxo, err := btc.utxo(txHash, vout, redeemScript)
+		select {
+		case res <- &utxoRes{utxo, err}:
+		case <-ctx.Done(): // discard late results
+		}
+	}()
+
+	var utxo *UTXO
+	select {
+	case <-ctx.Done():
+		err = context.DeadlineExceeded
+	case r := <-res:
+		utxo, err = r.UTXO, r.error
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	if utxo.nonStandardScript {
 		return nil, fmt.Errorf("non-standard script")
 	}
@@ -274,7 +297,7 @@ func (btc *Backend) ValidateContract(contract []byte) error {
 // VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
 // retrieving the corresponding UTXO. If the coin is not found or no longer
 // unspent, an asset.CoinNotFoundError is returned.
-func (btc *Backend) VerifyUnspentCoin(coinID []byte) error {
+func (btc *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
