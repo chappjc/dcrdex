@@ -74,8 +74,8 @@ type dcrNode interface {
 	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
-	GetBestBlockHash(context.Context) (*chainhash.Hash, error)
-	GetBlockChainInfo(context.Context) (*chainjson.GetBlockChainInfoResult, error)
+	GetBestBlockHash(ctx context.Context) (*chainhash.Hash, error)
+	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 }
 
 // The rpcclient package functions will return a rpcclient.ErrRequestCanceled

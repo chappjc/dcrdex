@@ -132,25 +132,25 @@ var (
 // rpcClient is an rpcclient.Client, or a stub for testing.
 type rpcClient interface {
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
-	GetBlockChainInfo(context.Context) (*chainjson.GetBlockChainInfoResult, error)
+	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
-	GetBestBlock(context.Context) (*chainhash.Hash, int64, error)
+	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
 	GetRawChangeAddress(ctx context.Context, account string, net dcrutil.AddressParams) (dcrutil.Address, error)
-	GetNewAddressGapPolicy(context.Context, string, dcrwallet.GapPolicy) (dcrutil.Address, error)
+	GetNewAddressGapPolicy(ctx context.Context, addrType string, gap dcrwallet.GapPolicy) (dcrutil.Address, error)
 	DumpPrivKey(ctx context.Context, address dcrutil.Address) (*dcrutil.WIF, error)
 	GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
-	WalletLock(context.Context) error
+	WalletLock(ctx context.Context) error
 	WalletPassphrase(ctx context.Context, passphrase string, timeoutSecs int64) error
 	Disconnected() bool
 	RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error)
-	WalletInfo(context.Context) (*walletjson.WalletInfoResult, error)
+	WalletInfo(ctx context.Context) (*walletjson.WalletInfoResult, error)
 }
 
 // The rpcclient package functions will return a rpcclient.ErrRequestCanceled
