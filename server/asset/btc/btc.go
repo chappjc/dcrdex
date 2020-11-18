@@ -240,34 +240,13 @@ func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 }
 
 // FundingCoin is an unspent output.
-func (btc *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 
-	// Maybe don't do this, just a test:
-	type utxoRes struct {
-		*UTXO
-		error
-	}
-	res := make(chan *utxoRes)
-	go func() {
-		utxo, err := btc.utxo(txHash, vout, redeemScript)
-		select {
-		case res <- &utxoRes{utxo, err}:
-		case <-ctx.Done(): // discard late results
-		}
-	}()
-
-	var utxo *UTXO
-	select {
-	case <-ctx.Done():
-		err = asset.ErrRequestTimeout
-	case r := <-res:
-		utxo, err = r.UTXO, r.error
-	}
-
+	utxo, err := btc.utxo(txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
