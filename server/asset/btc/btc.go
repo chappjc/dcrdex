@@ -81,7 +81,7 @@ type btcNode interface {
 // cache of block data for quick lookups. Backend implements asset.Backend, so
 // provides exported methods for DEX-related blockchain info.
 type Backend struct {
-	ready chan struct{}
+	cfg *dexbtc.Config
 	// The asset name (e.g. btc), primarily for logging purposes.
 	name string
 	// segwit should be set to true for blockchains that support segregated
@@ -132,6 +132,19 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	return NewBTCClone(assetName, true, configPath, logger, network, params, dexbtc.RPCPorts)
 }
 
+func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, cfg *dexbtc.Config) *Backend {
+	btc := &Backend{
+		cfg:         cfg,
+		name:        name,
+		blockCache:  newBlockCache(),
+		blockChans:  make(map[chan *asset.BlockUpdate]struct{}),
+		chainParams: chainParams,
+		log:         logger,
+		segwit:      segwit,
+	}
+	return btc
+}
+
 // NewBTCClone creates a BTC backend for a set of network parameters and default
 // network ports. A BTC clone can use this method, possibly in conjunction with
 // ReadCloneParams, to create a Backend for other assets with minimal coding.
@@ -145,34 +158,53 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 		return nil, err
 	}
 
+	return newBTC(name, segwit, params, logger, cfg), nil
+}
+
+// Shutdown down the rpcclient.Client.
+func (btc *Backend) shutdown() {
+	if btc.client != nil {
+		btc.client.Shutdown()
+		btc.client.WaitForShutdown()
+	}
+}
+
+func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	client, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
-		Host:         cfg.RPCBind,
-		User:         cfg.RPCUser,
-		Pass:         cfg.RPCPass,
+		Host:         btc.cfg.RPCBind,
+		User:         btc.cfg.RPCUser,
+		Pass:         btc.cfg.RPCPass,
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating %q RPC client: %w", name, err)
+		return nil, fmt.Errorf("error creating %q RPC client: %w", btc.name, err)
 	}
 
-	btc := newBTC(name, segwit, params, logger, client)
 	// Setting the client field will enable shutdown
 	btc.client = client
+	btc.node = client
 
 	// Prime the cache
 	bestHash, err := btc.client.GetBestBlockHash()
 	if err != nil {
+		btc.shutdown()
 		return nil, fmt.Errorf("error getting best block from rpc: %w", err)
 	}
 	if bestHash != nil {
-		_, err := btc.getBtcBlock(bestHash)
-		if err != nil {
+		if _, err = btc.getBtcBlock(bestHash); err != nil {
+			btc.shutdown()
 			return nil, fmt.Errorf("error priming the cache: %w", err)
 		}
 	}
 
-	return btc, nil
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		btc.run(ctx)
+	}()
+	return &wg, nil
 }
 
 // Contract is part of the asset.Backend interface. An asset.Contract is an
@@ -344,21 +376,6 @@ func (btc *Backend) FeeRate() (uint64, error) {
 func (btc *Backend) CheckAddress(addr string) bool {
 	_, err := btcutil.DecodeAddress(addr, btc.chainParams)
 	return err == nil
-}
-
-// Create a *Backend and start the block monitor loop.
-func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
-	btc := &Backend{
-		ready:       make(chan struct{}),
-		name:        name,
-		blockCache:  newBlockCache(),
-		blockChans:  make(map[chan *asset.BlockUpdate]struct{}),
-		chainParams: chainParams,
-		log:         logger,
-		node:        node,
-		segwit:      segwit,
-	}
-	return btc
 }
 
 // blockInfo returns block information for the verbose transaction data. The
@@ -795,23 +812,15 @@ func (btc *Backend) auditContract(contract *Contract) error {
 	return nil
 }
 
-// Ready returns a channel that is closed when Run completes its initialization
-// tasks and Core becomes ready for use.
-func (btc *Backend) Ready() <-chan struct{} {
-	return btc.ready
-}
-
-// Run is responsible for best block polling and checking the application
+// run is responsible for best block polling and checking the application
 // context to trigger a clean shutdown.
-func (btc *Backend) Run(ctx context.Context) {
+func (btc *Backend) run(ctx context.Context) {
 	defer btc.shutdown()
 
 	_, err := btc.FeeRate()
 	if err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
-
-	close(btc.ready)
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
@@ -938,14 +947,6 @@ out:
 		case <-ctx.Done():
 			break out
 		}
-	}
-}
-
-// Shutdown down the rpcclient.Client.
-func (btc *Backend) shutdown() {
-	if btc.client != nil {
-		btc.client.Shutdown()
-		btc.client.WaitForShutdown()
 	}
 }
 

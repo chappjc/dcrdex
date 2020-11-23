@@ -92,8 +92,8 @@ func translateRPCCancelErr(err error) error {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
-	ctx   context.Context
-	ready chan struct{}
+	ctx context.Context
+	cfg *config
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result in (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -115,11 +115,21 @@ type Backend struct {
 // Check that Backend satisfies the Backend interface.
 var _ asset.Backend = (*Backend)(nil)
 
+// unconnectedDCR returns a Backend without a node. The node should be set
+// before use.
+func unconnectedDCR(logger dex.Logger, cfg *config) *Backend {
+	return &Backend{
+		cfg:        cfg,
+		blockCache: newBlockCache(logger),
+		log:        logger,
+		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+	}
+}
+
 // NewBackend is the exported constructor by which the DEX will import the
-// Backend. The provided context.Context should be canceled when the DEX
-// application exits. If configPath is an empty string, the backend will
-// attempt to read the settings directly from the dcrd config file in its
-// default system location.
+// Backend. If configPath is an empty string, the backend will attempt to read
+// the settings directly from the dcrd config file in its default system
+// location.
 func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Backend, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
@@ -127,23 +137,32 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedDCR(logger)
-	// When the exported constructor is used, the node will be an
-	// rpcclient.Client.
-	dcr.client, err = connectNodeRPC(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass,
-		cfg.RPCCert)
+	return unconnectedDCR(logger, cfg), nil
+}
+
+func (dcr *Backend) shutdown() {
+	if dcr.client != nil {
+		dcr.client.Shutdown()
+		dcr.client.WaitForShutdown()
+	}
+}
+
+func (dcr *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	client, err := connectNodeRPC(dcr.cfg.RPCListen, dcr.cfg.RPCUser, dcr.cfg.RPCPass, dcr.cfg.RPCCert)
 	if err != nil {
 		return nil, err
 	}
+	dcr.client = client
 
 	// Ensure the network of the connected node is correct for the expected
 	// dex.Network.
-	net, err := dcr.client.GetCurrentNet(context.TODO())
+	net, err := dcr.client.GetCurrentNet(ctx)
 	if err != nil {
+		dcr.shutdown()
 		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
 	}
 	var wantCurrencyNet wire.CurrencyNet
-	switch network {
+	switch dcr.cfg.Network {
 	case dex.Testnet:
 		wantCurrencyNet = wire.TestNet3
 	case dex.Mainnet:
@@ -152,21 +171,25 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 		wantCurrencyNet = wire.SimNet
 	}
 	if net != wantCurrencyNet {
+		dcr.shutdown()
 		return nil, fmt.Errorf("wrong net %v", net.String())
 	}
 
 	// Check the required API versions.
-	versions, err := dcr.client.Version(context.TODO())
+	versions, err := dcr.client.Version(ctx)
 	if err != nil {
+		dcr.shutdown()
 		return nil, fmt.Errorf("DCR node version fetch error: %w", err)
 	}
 
 	ver, exists := versions["dcrdjsonrpcapi"]
 	if !exists {
+		dcr.shutdown()
 		return nil, fmt.Errorf("dcrd.Version response missing 'dcrdjsonrpcapi'")
 	}
 	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+		dcr.shutdown()
 		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
 			nodeSemver, requiredNodeVersion)
 	}
@@ -175,17 +198,31 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 
 	dcr.node = dcr.client
 	// Prime the cache with the best block.
-	bestHash, _, err := dcr.client.GetBestBlock(context.TODO())
+	bestHash, _, err := dcr.client.GetBestBlock(ctx)
 	if err != nil {
+		dcr.shutdown()
 		return nil, fmt.Errorf("error getting best block from dcrd: %w", err)
 	}
 	if bestHash != nil {
-		_, err := dcr.getDcrBlock(context.TODO(), bestHash)
+		_, err := dcr.getDcrBlock(ctx, bestHash)
 		if err != nil {
+			dcr.shutdown()
 			return nil, fmt.Errorf("error priming the cache: %w", err)
 		}
 	}
-	return dcr, nil
+
+	if _, err = dcr.FeeRate(); err != nil {
+		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
+	}
+
+	dcr.ctx = ctx
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.run(ctx)
+	}()
+	return &wg, nil
 }
 
 // InitTxSize is an asset.Backend method that must produce the max size of a
@@ -506,36 +543,8 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	return newTransaction(txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, isCoinbase, inputs, outputs, feeRate), nil
 }
 
-// Shutdown down the rpcclient.Client.
-func (dcr *Backend) shutdown() {
-	if dcr.client != nil {
-		dcr.client.Shutdown()
-		dcr.client.WaitForShutdown()
-	}
-}
-
-// unconnectedDCR returns a Backend without a node. The node should be set
-// before use.
-func unconnectedDCR(logger dex.Logger) *Backend {
-	return &Backend{
-		ready:      make(chan struct{}),
-		blockCache: newBlockCache(logger),
-		log:        logger,
-		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
-	}
-}
-
-// Ready returns a channel that is closed when Run completes its initialization
-// tasks and Core becomes ready for use.
-func (dcr *Backend) Ready() <-chan struct{} {
-	return dcr.ready
-}
-
-// Run processes the queue and monitors the application context. The
-// dcrd-registered handlers should perform any necessary type conversion and
-// then deposit the payload into the anyQ channel.
-func (dcr *Backend) Run(ctx context.Context) {
-	dcr.ctx = ctx
+// run processes the queue and monitors the application context.
+func (dcr *Backend) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// Shut down the RPC client on ctx.Done().
@@ -544,13 +553,6 @@ func (dcr *Backend) Run(ctx context.Context) {
 		dcr.shutdown()
 		wg.Done()
 	}()
-
-	_, err := dcr.FeeRate()
-	if err != nil {
-		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
-	}
-
-	close(dcr.ready)
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()

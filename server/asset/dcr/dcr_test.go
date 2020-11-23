@@ -45,8 +45,8 @@ func TestMain(m *testing.M) {
 
 // TestLoadConfig checks that configuration parsing works as expected.
 func TestLoadConfig(t *testing.T) {
-	cfg := &DCRConfig{}
-	parsedCfg := &DCRConfig{}
+	cfg := &config{}
+	parsedCfg := &config{}
 
 	tempDir, err := ioutil.TempDir("", "btctest")
 	if err != nil {
@@ -57,7 +57,7 @@ func TestLoadConfig(t *testing.T) {
 	rootParser := flags.NewParser(cfg, flags.None)
 	iniParser := flags.NewIniParser(rootParser)
 
-	runCfg := func(config *DCRConfig) error {
+	runCfg := func(config *config) error {
 		*cfg = *config
 		err := iniParser.WriteFile(filePath, flags.IniNone)
 		if err != nil {
@@ -68,7 +68,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Try with just the name. Error expected.
-	err = runCfg(&DCRConfig{
+	err = runCfg(&config{
 		RPCUser: "somename",
 	})
 	if err == nil {
@@ -76,7 +76,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Try with just the password. Error expected.
-	err = runCfg(&DCRConfig{
+	err = runCfg(&config{
 		RPCPass: "somepass",
 	})
 	if err == nil {
@@ -84,7 +84,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Give both name and password. This should not be an error.
-	err = runCfg(&DCRConfig{
+	err = runCfg(&config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 	})
@@ -104,7 +104,7 @@ func TestLoadConfig(t *testing.T) {
 	if parsedCfg.RPCCert != defaultRPCCert {
 		t.Errorf("RPCCert not set implicitly")
 	}
-	err = runCfg(&DCRConfig{
+	err = runCfg(&config{
 		RPCUser:   "abc",
 		RPCPass:   "def",
 		RPCListen: "123",
@@ -694,10 +694,12 @@ func testMsgTxRevocation() *testMsgTx {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	dcr := unconnectedDCR(tLogger)
+	dcr := unconnectedDCR(tLogger, nil) // never actually Connect, so no config
 	dcr.node = &testNode{}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	dcr.ctx = ctx
+
 	var wg sync.WaitGroup
 	shutdown := func() {
 		cancel()
@@ -705,10 +707,9 @@ func testBackend() (*Backend, func()) {
 	}
 	wg.Add(1)
 	go func() {
-		dcr.Run(ctx)
+		dcr.run(ctx)
 		wg.Done()
 	}()
-	<-dcr.Ready()
 	return dcr, shutdown
 }
 

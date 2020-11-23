@@ -44,7 +44,7 @@ type Config struct {
 	Context context.Context `ini:"-"`
 }
 
-// loadConfig loads the DCRConfig from a settings map. If no values are found
+// loadConfig loads the config from a settings map. If no values are found
 // for RPCListen or RPCCert in the specified file, default values will be used.
 // If there is no error, the module-level chainParams variable will be set
 // appropriately for the network.

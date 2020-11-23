@@ -21,8 +21,7 @@ const (
 
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
-	dex.Runner
-	Ready() <-chan struct{} // consider adding to dex.Runner
+	dex.Connector
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
