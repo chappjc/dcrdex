@@ -1054,7 +1054,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 }
 
 // connectWallet connects to wallet and validate the known deposit address
-// after successfull connectection, if deposit address does not belong to
+// after successfull connection, if deposit address does not belong to
 // wallet it generates new address and updates xcWallet and dbWallet, therefore
 // it might hold the wallet lock
 func (c *Core) connectWallet(w *xcWallet) error {
@@ -1267,6 +1267,19 @@ func (c *Core) refreshUser() {
 	c.userMtx.Lock()
 	c.user = u
 	c.userMtx.Unlock()
+}
+
+// setUserWalletState updates user's struct wallet state to the given wallet
+// state
+func (c *Core) setUserWalletState(state *WalletState) {
+	c.userMtx.Lock()
+	defer c.userMtx.Unlock()
+
+	sa, found := c.user.Assets[state.AssetID]
+	if !found {
+		c.log.Errorf("Unknown assed %d", state.AssetID)
+	}
+	sa.Wallet = state
 }
 
 // CreateWallet creates a new exchange wallet.
@@ -1678,7 +1691,6 @@ func (c *Core) newDepositAddress(w *xcWallet) (string, error) {
 			unbip(w.AssetID))
 	}
 
-	c.log.Tracef("tttttt")
 	addr, err := w.Address()
 	if err != nil {
 		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
@@ -1686,7 +1698,6 @@ func (c *Core) newDepositAddress(w *xcWallet) (string, error) {
 	// Set xcWallet's new address
 	w.setAddress(addr)
 
-	c.log.Tracef("fdfdfd")
 	dbWallet, err := c.db.Wallet(w.dbID)
 	if err != nil {
 		return "", fmt.Errorf("error retreiving DB wallet: %w", err)
@@ -1696,12 +1707,11 @@ func (c *Core) newDepositAddress(w *xcWallet) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("UpdateWallet error for %s: %w", unbip(w.AssetID), err)
 	}
+	// Update wallet state on user struct
+	walletState := w.state()
+	c.setUserWalletState(walletState)
+	c.notify(newWalletStateNote(walletState))
 
-	c.refreshUser()
-
-	c.notify(newWalletStateNote(w.state()))
-
-	c.log.Tracef("fffffffff \n\n\n")
 	return addr, nil
 }
 
