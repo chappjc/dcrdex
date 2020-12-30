@@ -1558,6 +1558,11 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if err != nil {
 		return newError(walletErr, "error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
+	err = c.db.UpdateWallet(dbWallet)
+	if err != nil {
+		wallet.Disconnect()
+		return newError(dbErr, "error saving wallet configuration: %v", err)
+	}
 
 	// Must connect to ensure settings are good.
 	err = c.connectWallet(wallet)
@@ -1570,11 +1575,6 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 			wallet.Disconnect()
 			return newError(walletAuthErr, "wallet successfully connected, but errored unlocking. reconfiguration not saved: %v", err)
 		}
-	}
-	err = c.db.UpdateWallet(dbWallet)
-	if err != nil {
-		wallet.Disconnect()
-		return newError(dbErr, "error saving wallet configuration: %v", err)
 	}
 
 	c.connMtx.RLock()
