@@ -915,6 +915,33 @@ func (c *Core) Run(ctx context.Context) {
 		c.latencyQ.Run(ctx)
 	}()
 	c.wg.Wait()
+
+	// Lock and disconnect the wallets.
+	c.walletMtx.Lock()
+	for assetID, wallet := range c.wallets {
+		delete(c.wallets, assetID)
+		if !wallet.connected() {
+			continue
+		}
+		symb := strings.ToUpper(unbip(assetID))
+		c.log.Infof("Locking %s wallet", symb)
+		if err := wallet.Lock(); err != nil {
+			c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
+		}
+		wallet.Disconnect()
+	}
+	c.walletMtx.Unlock()
+
+	// Clear account private keys and wait for the DEX ws connections that began
+	// shutting down on context cancellation.
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+	for _, dc := range c.conns {
+		// context should be canceled allowing just a Wait(), but just in case
+		// use Disconnect otherwise this could hang forever.
+		dc.connMaster.Disconnect()
+		dc.acct.lock()
+	}
 	c.log.Infof("DEX client core off")
 }
 
@@ -1086,7 +1113,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 // synching, this also starts a goroutine to monitor sync status, emitting
 // WalletStateNotes on each progress update.
 func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
-	err = w.Connect(c.ctx) // ensures valid deposit address
+	err = w.Connect() // ensures valid deposit address
 	if err != nil {
 		return "", codedError(connectWalletErr, err)
 	}
@@ -1382,13 +1409,15 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	initErr := func(s string, a ...interface{}) error {
+		_ = wallet.Lock() // just try, but don't confuse the user with an error
 		wallet.Disconnect()
 		return fmt.Errorf(s, a...)
 	}
 
 	err = wallet.Unlock(crypter)
 	if err != nil {
-		return initErr("%s wallet authentication error: %w", symbol, err)
+		wallet.Disconnect()
+		return fmt.Errorf("%s wallet authentication error: %w", symbol, err)
 	}
 
 	balances, err := c.walletBalance(wallet)
@@ -1628,6 +1657,8 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	c.wallets[assetID] = wallet
 
 	if oldWallet.connected() {
+		// NOTE: Cannot lock the wallet backend because it may be the same as
+		// the one just connected.
 		go oldWallet.Disconnect()
 	}
 
@@ -4424,64 +4455,42 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	c.updateBalances(assets)
 }
 
-// PromptShutdown asks confirmation to shutdown the dexc when has active orders.
-// If the user answers in the affirmative, the wallets are locked and true is
-// returned. The provided channel is used to allow an OS signal to break the
-// prompt and force the shutdown with out answering the prompt in the
-// affirmative.
+// PromptShutdown checks if there are active orders and asks confirmation to
+// shutdown if there are. The return value indicates if it is safe to stop Core
+// or if the user has confirmed they want to shutdown with active orders.
 func (c *Core) PromptShutdown() bool {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-
-	lockWallets := func() {
-		// Lock wallets
-		for assetID := range c.User().Assets {
-			wallet, found := c.wallet(assetID)
-			if found && wallet.connected() {
-				if err := wallet.Lock(); err != nil {
-					c.log.Errorf("error locking wallet: %v", err)
-				}
-			}
-		}
-		// If all wallets locked, lock each dex account.
-		for _, dc := range c.conns {
-			dc.acct.lock()
-		}
-	}
-
-	ok := true
+	c.connMtx.RLock()
+	var haveActiveOrders bool
 	for _, dc := range c.conns {
 		if dc.hasActiveOrders() {
-			ok = false
+			haveActiveOrders = true
 			break
 		}
 	}
+	c.connMtx.RUnlock()
 
-	if !ok {
-		fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
-			"Do you want to quit anyway? ('y' to quit, 'n' or enter to abort shutdown):")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-		if err := scanner.Err(); err != nil {
-			fmt.Printf("Input error: %v", err)
-			return false
-		}
-
-		switch strings.ToLower(scanner.Text()) {
-		case "y", "yes":
-			ok = true
-		case "n", "no":
-			fallthrough
-		default:
-			fmt.Println("Shutdown aborted.")
-		}
+	if !haveActiveOrders {
+		return true
 	}
 
-	if ok {
-		lockWallets()
+	fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
+		"Do you want to quit anyway? ('yes' to quit, or enter to abort shutdown): ")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan() // waiting for user input
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Input error: %v", err)
+		return false
 	}
 
-	return ok
+	switch resp := strings.ToLower(scanner.Text()); resp {
+	case "y", "yes":
+		return true
+	case "n", "no", "":
+	default: // anything else aborts, but warn about it
+		fmt.Printf("Unrecognized response %q. ", resp)
+	}
+	fmt.Println("Shutdown aborted.")
+	return false
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
