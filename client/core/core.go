@@ -3229,6 +3229,17 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		return nil, err
 	}
 
+	refundedMatches := map[string]bool{ // taker in MakerSwapCast, actually TakerSwapCast (and manually refunded)
+		"729597b695c0c8842426f7060693fbb2d1f2699b5cf32e291df823055b381a8a": true,
+		"1edaedaf92b959c1f719bbf5ba05e72fb59fd09991d350a7f786a4fab9eb2731": true,
+		"87a848d16241335c7e998f03836c1cec27581752e8975d6d60c5b25c7aaadc8e": true,
+		"6ce87a62cf1d0ae45d8aa2ced58ba078db7215c9cf5707a7e7a6f4423d6f8514": true,
+	}
+	redeemedMatches := map[string]bool{ // taker in MakerRedeemed, actually MatchComplete
+		"0fd8feccf7fe190f44983dbfc51e39a4d5f1259ed4ff9ea9fdf05146cc5bac45": true,
+		"70c225c15aaa46ec0a01935e8791c816820d91cb1fcb78433a1ffd8ab098e5a8": true,
+	}
+
 	// Index all of the cancel orders so we can account for them when loading
 	// the trade orders. Whatever remains is orphaned.
 	unknownCancels := make(map[order.OrderID]struct{})
@@ -3273,8 +3284,26 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				// tracker.cancel is set from LinkedOrder with cancelTrade.
 				continue
 			}
-			tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
-				id:        dbMatch.Match.MatchID,
+			mid := dbMatch.Match.MatchID
+			if refundedMatches[mid.String()] {
+				c.log.Debugf("revoking manually refunded match %v", mid)
+				dbMatch.MetaData.Proof.SelfRevoked = true // stay in MakerSwapCast so this will be inactive next startup
+				if err = c.db.UpdateMatch(dbMatch); err != nil {
+					c.log.Errorf("failed to update match: %v", err)
+				}
+				continue
+			}
+			if redeemedMatches[mid.String()] {
+				c.log.Debugf("completing already redeemed match %v", mid)
+				dbMatch.MetaData.Proof.SelfRevoked = true
+				dbMatch.SetStatus(order.MatchComplete) // from MakerRedeemed -> revoked MatchComplete will be inactive next startup
+				if err = c.db.UpdateMatch(dbMatch); err != nil {
+					c.log.Errorf("failed to update match: %v", err)
+				}
+				continue
+			}
+			tracker.matches[mid] = &matchTracker{
+				id:        mid,
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
 				MetaMatch: *dbMatch,
