@@ -41,7 +41,14 @@ const (
 	InsertEpochReport = `INSERT INTO %s (epoch_end, epoch_dur, match_volume, quote_volume,
 			book_buys, book_buys_5, book_buys_25, book_sells, book_sells_5, book_sells_25,
 			high_rate, low_rate, start_rate, end_rate)
-			VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`
+			VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			ON CONFLICT (epoch_end) DO NOTHING;`
+
+	InsertPartialEpochReport = `INSERT INTO %s (epoch_end, epoch_dur, match_volume, quote_volume,
+		book_buys, book_buys_5, book_buys_25, book_sells, book_sells_5, book_sells_25, -- zeros
+		high_rate, low_rate, start_rate, end_rate)
+		VALUES($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, $5, $6, $7, $8)
+		ON CONFLICT (epoch_end) DO NOTHING;`
 
 	// SelectEpochCandles selects all rows from the epoch_reports table sorted
 	// by ascending time.

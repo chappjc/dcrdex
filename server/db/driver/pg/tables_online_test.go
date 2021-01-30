@@ -34,7 +34,8 @@ func TestPrepareTables(t *testing.T) {
 		t.Error(err)
 	}
 
-	// Cover the cases where the tables already exist (OK).
+	// Cover the cases where the tables already exist (OK). This hits the
+	// upgradeDB path, which returns early with current == dbVersion.
 	err = PrepareTables(archie.db, markets)
 	if err != nil {
 		t.Error(err)

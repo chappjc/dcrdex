@@ -194,6 +194,10 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		return nil, fmt.Errorf("unknown network %d", cfg.Net)
 	}
 
+	// TODO: remove feeKeyBranch and feeKeyBranch fields, and the CreateKeyEntry
+	// call. These are deprecated with the introduction of the new registration
+	// protocol, where the fee addresses are managed by the AuthManager.
+
 	// Get the master extended public key.
 	masterKey, err := hdkeychain.NewKeyFromString(cfg.FeeKey, archiver.keyParams)
 	if err != nil {

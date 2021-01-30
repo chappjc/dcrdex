@@ -71,8 +71,10 @@ func createMarketTables(db *sql.DB, marketUID string) error {
 	if err != nil {
 		return err
 	}
-	if !created {
-		log.Tracef(`Market schema "%s" already exists.`, marketUID)
+	if created {
+		log.Debugf("Created new market schema %q", marketUID)
+	} else {
+		log.Tracef("Market schema %q already exists.", marketUID)
 	}
 
 	for _, c := range createMarketTableStatements {
