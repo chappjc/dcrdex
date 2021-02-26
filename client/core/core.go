@@ -121,6 +121,9 @@ func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 // marketMap creates a map of this DEX's *Market keyed by name/ID,
 // [base]_[quote].
 func (dc *dexConnection) marketMap() map[string]*Market {
+	if atomic.LoadUint32(&dc.connected) == 0 {
+		return nil
+	}
 	dc.cfgMtx.RLock()
 	mktConfigs := dc.cfg.Markets
 	dc.cfgMtx.RUnlock()
@@ -1069,9 +1072,12 @@ func (c *Core) dexConnections() []*dexConnection {
 func (c *Core) exchangeMap() map[string]*Exchange {
 	infos := make(map[string]*Exchange, len(c.conns))
 	for _, dc := range c.dexConnections() {
-		dc.cfgMtx.RLock()
-		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
-		dc.cfgMtx.RUnlock()
+		var requiredConfs uint32
+		if atomic.LoadUint32(&dc.connected) == 1 {
+			dc.cfgMtx.RLock()
+			requiredConfs = uint32(dc.cfg.RegFeeConfirms)
+			dc.cfgMtx.RUnlock()
+		}
 
 		dc.assetsMtx.RLock()
 		assets := make(map[uint32]*dex.Asset, len(dc.assets))
@@ -3405,6 +3411,11 @@ func (c *Core) verifyAccount(acct *db.AccountInfo) bool {
 	dc, err := c.connectDEX(acct)
 	if err != nil {
 		c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
+		// update failed connection, so we can give feedback.
+		c.connMtx.Lock()
+		c.conns[host] = dc
+		c.connMtx.Unlock()
+		c.log.Debugf("dex connection to %s ready", acct.Host)
 		return false
 	}
 	c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
@@ -4060,8 +4071,18 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// If the initial connection returned an error, shut it down to kill the
 	// auto-reconnect cycle.
 	if err != nil {
+		dc := &dexConnection{
+			WsConn:     conn,
+			log:        c.log,
+			connMaster: connMaster,
+			books:      make(map[string]*bookie),
+			acct:       newDEXAccount(acctInfo),
+			trades:     make(map[order.OrderID]*trackedTrade),
+			notify:     c.notify,
+			connected:  0,
+		}
 		connMaster.Disconnect()
-		return nil, err
+		return dc, err
 	}
 
 	// Request the market configuration. Disconnect from the DEX server if the

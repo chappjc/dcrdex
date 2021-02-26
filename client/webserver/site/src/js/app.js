@@ -497,8 +497,8 @@ export default class Application {
       case 'walletstate':
       case 'walletconfig': {
         const wallet = note.wallet
-        this.assets[wallet.assetID].wallet = wallet
-        this.walletMap[wallet.assetID] = wallet
+        if (this.assets !== undefined) this.assets[wallet.assetID].wallet = wallet
+        if (this.walletMap !== undefined) this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
         balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
         break
