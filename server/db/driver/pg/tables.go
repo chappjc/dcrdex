@@ -139,7 +139,7 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 		}
 		err = setDBVersion(db, dbVersion) // no upgrades
 		if err != nil {
-			return fmt.Errorf("failed to create row for meta table: %w", err)
+			return fmt.Errorf("failed to set db version in meta table: %w", err)
 		}
 		log.Infof("Created new meta table at version %d", dbVersion)
 
