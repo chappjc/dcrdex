@@ -121,7 +121,7 @@ func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 // marketMap creates a map of this DEX's *Market keyed by name/ID,
 // [base]_[quote].
 func (dc *dexConnection) marketMap() map[string]*Market {
-	if atomic.LoadUint32(&dc.connected) == 0 {
+	if dc.cfg == nil {
 		return nil
 	}
 	dc.cfgMtx.RLock()
@@ -1073,7 +1073,7 @@ func (c *Core) exchangeMap() map[string]*Exchange {
 	infos := make(map[string]*Exchange, len(c.conns))
 	for _, dc := range c.dexConnections() {
 		var requiredConfs uint32
-		if atomic.LoadUint32(&dc.connected) == 1 {
+		if dc.cfg != nil {
 			dc.cfgMtx.RLock()
 			requiredConfs = uint32(dc.cfg.RegFeeConfirms)
 			dc.cfgMtx.RUnlock()
