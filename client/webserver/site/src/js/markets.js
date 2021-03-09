@@ -516,7 +516,8 @@ export default class MarketsPage extends BasePage {
       this.market = {
         dex: dex
       }
-      this.page.errMsg.textContent = 'Connection to dex server failed.'
+      this.page.errMsg.textContent = 'Connection to dex server failed. ' +
+        'You can close dexc and try again later.'
       Doc.show(this.page.errMsg)
       this.loaded()
       this.main.style.opacity = 1
