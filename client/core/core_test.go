@@ -828,6 +828,7 @@ func newTestRig() *testRig {
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[string]*blockWaiter),
 			piSyncers:     make(map[order.OrderID]chan struct{}),
+			sentCommits:   make(map[order.Commitment]chan struct{}),
 			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
@@ -2407,6 +2408,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	tracker := &trackedTrade{
 		Order:    ord,
 		preImg:   preImg,
+		mktID:    tDcrBtcMktName,
 		db:       rig.db,
 		dc:       rig.dc,
 		metaData: &db.OrderMetaData{},
@@ -2415,7 +2417,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	// Simulate an order submission request having completed.
 	loadSyncer := func() {
 		rig.core.piSyncMtx.Lock()
-		rig.core.piSyncers[oid] = make(chan struct{})
+		rig.core.piSyncers[oid] = nil // set nil to ensure it's just a map entry
 		rig.core.piSyncMtx.Unlock()
 	}
 
@@ -2424,6 +2426,39 @@ func TestHandlePreimageRequest(t *testing.T) {
 	err := handlePreimageRequest(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("handlePreimageRequest error: %v", err)
+	}
+
+	// test the new path with rig.core.sentCommits
+	commitSig := make(chan struct{})
+	// close(commitSig)
+	rig.core.sentCommitsMtx.Lock()
+	rig.core.sentCommits[preImg.Commit()] = commitSig
+	rig.core.sentCommitsMtx.Unlock()
+
+	commit := preImg.Commit()
+	payload = &msgjson.PreimageRequest{
+		OrderID:    oid[:],
+		Commitment: commit[:],
+	}
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+	notes := rig.core.NotificationFeed()
+
+	rig.dc.trades[oid] = tracker
+	err = handlePreimageRequest(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("handlePreimageRequest error: %v", err)
+	}
+	// it has gone async now, waiting for commitSig
+	close(commitSig)
+
+	select {
+	case note := <-notes:
+		if note.Subject() != SubjectPreimageSent {
+			t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no order note from preimage request handling")
 	}
 
 	ensureErr := func(tag string) {
