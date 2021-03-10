@@ -448,7 +448,6 @@ type TCoin struct {
 	confsErr  error
 	auditAddr string
 	auditVal  uint64
-	txData    []byte
 }
 
 func (coin *TCoin) Confirmations(context.Context) (int64, error) {
@@ -459,10 +458,6 @@ func (coin *TCoin) Confirmations(context.Context) (int64, error) {
 
 func (coin *TCoin) Addresses() []string {
 	return []string{coin.auditAddr}
-}
-
-func (coin *TCoin) TxData() []byte {
-	return coin.txData
 }
 
 func (coin *TCoin) setConfs(confs int64) {
@@ -835,8 +830,8 @@ func (rig *testRig) auditSwap(msg *msgjson.Message, oid order.OrderID, swap *tSw
 	if params.Contract.String() != swap.contract {
 		return fmt.Errorf("%s : incorrect contract. expected '%s', got '%s'", tag, swap.contract, params.Contract)
 	}
-	if !bytes.Equal(params.TxData, swap.coin.txData) {
-		return fmt.Errorf("%s : incorrect tx data. expected '%s', got '%s'", tag, swap.coin.txData, params.TxData)
+	if !bytes.Equal(params.TxData, swap.coin.TxData) {
+		return fmt.Errorf("%s : incorrect tx data. expected '%s', got '%s'", tag, swap.coin.TxData, params.TxData)
 	}
 	return nil
 }
@@ -1221,12 +1216,12 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		auditAddr: recipient + tRecipientSpoofer,
 		auditVal:  auditVal * tValSpoofer,
 		id:        coinID,
-		txData:    encode.RandomBytes(100),
 	}
 
 	contract := &asset.Contract{
 		Coin:        coin,
 		SwapAddress: recipient + tRecipientSpoofer,
+		TxData:      encode.RandomBytes(100),
 	}
 
 	contract.LockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))

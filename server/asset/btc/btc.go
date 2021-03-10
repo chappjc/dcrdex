@@ -871,6 +871,7 @@ func (btc *Backend) auditContract(contract *Output) (*asset.Contract, error) {
 		SwapAddress:  receiver.String(),
 		RedeemScript: contract.redeemScript,
 		LockTime:     time.Unix(int64(lockTime), 0),
+		TxData:       tx.raw,
 	}, nil
 }
 
@@ -1071,4 +1072,3 @@ func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
