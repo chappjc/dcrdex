@@ -121,12 +121,13 @@ func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 // marketMap creates a map of this DEX's *Market keyed by name/ID,
 // [base]_[quote].
 func (dc *dexConnection) marketMap() map[string]*Market {
-	if dc.cfg == nil {
+	dc.cfgMtx.RLock()
+	cfg := dc.cfg
+	dc.cfgMtx.RUnlock()
+	if cfg == nil {
 		return nil
 	}
-	dc.cfgMtx.RLock()
-	mktConfigs := dc.cfg.Markets
-	dc.cfgMtx.RUnlock()
+	mktConfigs := cfg.Markets
 
 	marketMap := make(map[string]*Market, len(mktConfigs))
 	for _, mkt := range mktConfigs {
@@ -1073,10 +1074,12 @@ func (c *Core) exchangeMap() map[string]*Exchange {
 	infos := make(map[string]*Exchange, len(c.conns))
 	for _, dc := range c.dexConnections() {
 		var requiredConfs uint32
-		if dc.cfg != nil {
-			dc.cfgMtx.RLock()
-			requiredConfs = uint32(dc.cfg.RegFeeConfirms)
-			dc.cfgMtx.RUnlock()
+		dc.cfgMtx.RLock()
+		cfg := dc.cfg
+		dc.cfgMtx.RUnlock()
+
+		if cfg != nil {
+			requiredConfs = uint32(cfg.RegFeeConfirms)
 		}
 
 		dc.assetsMtx.RLock()
@@ -3415,7 +3418,7 @@ func (c *Core) verifyAccount(acct *db.AccountInfo) bool {
 		c.connMtx.Lock()
 		c.conns[host] = dc
 		c.connMtx.Unlock()
-		c.log.Debugf("dex connection to %s ready", acct.Host)
+		c.log.Debugf("dex connection to %s failed", acct.Host)
 		return false
 	}
 	c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
@@ -4068,22 +4071,24 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 
 	connMaster := dex.NewConnectionMaster(conn)
 	err = connMaster.Connect(c.ctx)
+	dc := &dexConnection{
+		WsConn:     conn,
+		log:        c.log,
+		connMaster: connMaster,
+		books:      make(map[string]*bookie),
+		acct:       newDEXAccount(acctInfo),
+		trades:     make(map[order.OrderID]*trackedTrade),
+		notify:     c.notify,
+	}
 	// If the initial connection returned an error, shut it down to kill the
 	// auto-reconnect cycle.
 	if err != nil {
-		dc := &dexConnection{
-			WsConn:     conn,
-			log:        c.log,
-			connMaster: connMaster,
-			books:      make(map[string]*bookie),
-			acct:       newDEXAccount(acctInfo),
-			trades:     make(map[order.OrderID]*trackedTrade),
-			notify:     c.notify,
-			connected:  0,
-		}
+		dc.connected = 0
 		connMaster.Disconnect()
 		return dc, err
 	}
+	// if no error happened update dc.connected value.
+	dc.connected = 1
 
 	// Request the market configuration. Disconnect from the DEX server if the
 	// configuration cannot be retrieved.
@@ -4093,28 +4098,18 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		connMaster.Disconnect()
 		return nil, fmt.Errorf("Error fetching DEX server config: %w", err)
 	}
+	dc.cfg = dexCfg
 
 	assets, epochMap, err := generateDEXMaps(host, dexCfg)
 	if err != nil {
 		return nil, err
 	}
+	dc.epoch = epochMap
+	dc.assets = assets
 
 	// Create the dexConnection and listen for incoming messages.
 	bTimeout := time.Millisecond * time.Duration(dexCfg.BroadcastTimeout)
-	dc := &dexConnection{
-		WsConn:       conn,
-		log:          c.log,
-		connMaster:   connMaster,
-		assets:       assets,
-		cfg:          dexCfg,
-		tickInterval: bTimeout / tickCheckDivisions,
-		books:        make(map[string]*bookie),
-		acct:         newDEXAccount(acctInfo),
-		trades:       make(map[order.OrderID]*trackedTrade),
-		notify:       c.notify,
-		epoch:        epochMap,
-		connected:    1,
-	}
+	dc.tickInterval = bTimeout / tickCheckDivisions
 
 	c.log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
 

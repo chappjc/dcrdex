@@ -68,7 +68,7 @@ export default class MarketsPage extends BasePage {
       'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
       'maxBox',
       // errors
-      'errMsg'
+      'chartErrMsg'
     ])
     this.main = main
     this.loaded = app.loading(this.main.parentElement)
@@ -478,11 +478,9 @@ export default class MarketsPage extends BasePage {
     const { confs, confsrequired } = dex
     const feePending = this.hasFeePending()
 
-    // if dex is not connected to server, is not possible to know fee
+    // If dex is not connected to server, is not possible to know fee
     // registration status.
-    if (!dex.connected) {
-      return
-    }
+    if (!dex.connected) return
 
     this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
 
@@ -513,12 +511,10 @@ export default class MarketsPage extends BasePage {
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
     if (!dex.connected) {
-      this.market = {
-        dex: dex
-      }
-      this.page.errMsg.textContent = 'Connection to dex server failed. ' +
+      this.market = { dex: dex }
+      this.page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
         'You can close dexc and try again later.'
-      Doc.show(this.page.errMsg)
+      Doc.show(this.page.chartErrMsg)
       this.loaded()
       this.main.style.opacity = 1
       Doc.hide(this.page.marketLoader)
@@ -1633,10 +1629,8 @@ class MarketList {
   first () {
     const firstXC = this.sortedSections()[0]
     const firstMkt = firstXC.first()
-    // can not find markets if server connection failed.
-    if (!firstMkt) {
-      return makeMarket(firstXC.host)
-    }
+    // Cannot find markets if server connection failed.
+    if (!firstMkt) return makeMarket(firstXC.host)
     return makeMarket(firstXC.host, firstMkt.baseID, firstMkt.quoteID)
   }
 
@@ -1682,14 +1676,14 @@ class ExchangeSection {
     this.rows = Doc.tmplElement(box, 'mkts')
     const rowTmpl = Doc.tmplElement(this.rows, 'mktrow')
     this.rows.removeChild(rowTmpl)
-    // if disconnected is not possible to get the markets from the server.
-    if (dex.markets) {
-      for (const mkt of Object.values(dex.markets)) {
-        this.marketRows.push(new MarketRow(rowTmpl, mkt))
-      }
-      for (const market of this.sortedMarkets()) {
-        this.rows.appendChild(market.row)
-      }
+    // If disconnected is not possible to get the markets from the server.
+    if (!dex.markets) return
+
+    for (const mkt of Object.values(dex.markets)) {
+      this.marketRows.push(new MarketRow(rowTmpl, mkt))
+    }
+    for (const market of this.sortedMarkets()) {
+      this.rows.appendChild(market.row)
     }
   }
 
