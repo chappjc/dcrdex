@@ -6,7 +6,6 @@ package auth
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math"
 	"sync"
@@ -1033,7 +1032,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 // a response is issued, and a clientInfo is created or updated.
 func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	connect := new(msgjson.Connect)
-	err := json.Unmarshal(msg.Payload, &connect)
+	err := msg.Unmarshal(&connect)
 	if err != nil || connect == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
@@ -1343,7 +1342,7 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 			"cannot use route 'match_status' on an unauthorized connection")
 	}
 	var matchReqs []msgjson.MatchRequest
-	err := json.Unmarshal(msg.Payload, &matchReqs)
+	err := msg.Unmarshal(&matchReqs)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error parsing match_status request")
 	}
@@ -1474,7 +1473,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 	}
 
 	var orderReqs []*msgjson.OrderStatusRequest
-	err := json.Unmarshal(msg.Payload, &orderReqs)
+	err := msg.Unmarshal(&orderReqs)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status request")
 	}

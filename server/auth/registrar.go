@@ -4,7 +4,6 @@
 package auth
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -27,7 +26,7 @@ var (
 func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	register := new(msgjson.Register)
-	err := json.Unmarshal(msg.Payload, &register)
+	err := msg.Unmarshal(&register)
 	if err != nil || register == nil /* null payload */ {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
@@ -97,7 +96,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	notifyFee := new(msgjson.NotifyFee)
-	err := json.Unmarshal(msg.Payload, &notifyFee)
+	err := msg.Unmarshal(&notifyFee)
 	if err != nil || notifyFee == nil /* null payload */ {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,

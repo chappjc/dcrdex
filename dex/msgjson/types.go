@@ -184,6 +184,8 @@ const (
 	CandlesRoute = "candles"
 )
 
+const errNullRespPayload = dex.ErrorKind("null response payload")
+
 type Bytes = dex.Bytes
 
 // Signable allows for serialization and signing.
@@ -368,7 +370,7 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 		return nil, err
 	}
 	if resp == nil /* null JSON */ {
-		return nil, fmt.Errorf("null response payload")
+		return nil, errNullRespPayload
 	}
 	return resp, nil
 }
