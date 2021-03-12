@@ -1343,9 +1343,11 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 	}
 	var matchReqs []msgjson.MatchRequest
 	err := msg.Unmarshal(&matchReqs)
-	if err != nil {
+	if err != nil || matchReqs == nil /* null Payload */ {
 		return msgjson.NewError(msgjson.RPCParseError, "error parsing match_status request")
 	}
+	// NOTE: If len(matchReqs)==0 but not nil, Payload was `[]`, demanding a
+	// positive response with `[]` in ResponsePayload.Result.
 
 	mkts := make(map[string]*marketMatches)
 	var count int
@@ -1373,7 +1375,7 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 		}
 	}
 
-	results := make([]*msgjson.MatchStatusResult, 0, count)
+	results := make([]*msgjson.MatchStatusResult, 0, count) // should be non-nil even for count==0
 	for _, mm := range mkts {
 		statuses, err := auth.storage.MatchStatuses(client.acct.ID, mm.base, mm.quote, mm.idList())
 		// no results is not an error
@@ -1477,7 +1479,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status request")
 	}
-	if len(orderReqs) == 0 {
+	if len(orderReqs) == 0 { // includes null and [] Payload
 		return msgjson.NewError(msgjson.InvalidRequestError, "no order id provided")
 	}
 	if len(orderReqs) > maxIDsPerOrderStatusRequest {
