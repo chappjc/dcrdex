@@ -998,8 +998,8 @@ func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errM
 		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := s.authMgr.Send(user, msg); err != nil {
-		log.Infof("Unable to send %s error response (code = %d, msg = %s) to disconnected user %v: %q",
-			msg.Route, code, errMsg, user, err)
+		log.Infof("Unable to send error response (code = %d, msg = %s) to disconnected user %v: %q",
+			code, errMsg, user, err)
 	}
 }
 
@@ -1011,7 +1011,7 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := s.authMgr.Send(user, msg); err != nil {
-		log.Infof("Unable to send %s success response to disconnected user %v: %v", msg.Route, user, err)
+		log.Infof("Unable to send success response to disconnected user %v: %v", user, err)
 	}
 }
 
