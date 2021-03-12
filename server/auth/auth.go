@@ -1034,7 +1034,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	connect := new(msgjson.Connect)
 	err := json.Unmarshal(msg.Payload, &connect)
-	if err != nil {
+	if err != nil || connect == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "error parsing connect request",

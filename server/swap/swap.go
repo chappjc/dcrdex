@@ -1580,7 +1580,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 
 	params := new(msgjson.Init)
 	err := json.Unmarshal(msg.Payload, &params)
-	if err != nil {
+	if err != nil || params == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "Error decoding 'init' method params",
@@ -1696,9 +1696,8 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	}
 
 	params := new(msgjson.Redeem)
-
 	err := json.Unmarshal(msg.Payload, &params)
-	if err != nil {
+	if err != nil || params == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "Error decoding 'redeem' request payload",
