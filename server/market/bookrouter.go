@@ -5,7 +5,6 @@ package market
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"decred.org/dcrdex/dex"
@@ -483,8 +482,8 @@ func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 // notifications.
 func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	sub := new(msgjson.OrderBookSubscription)
-	err := json.Unmarshal(msg.Payload, sub)
-	if err != nil {
+	err := msg.Unmarshal(&sub)
+	if err != nil || sub == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "error parsing orderbook request",
@@ -514,8 +513,8 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 // order book.
 func (r *BookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	unsub := new(msgjson.UnsubOrderBook)
-	err := json.Unmarshal(msg.Payload, unsub)
-	if err != nil {
+	err := msg.Unmarshal(&unsub)
+	if err != nil || unsub == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "error parsing unsub_orderbook request",
