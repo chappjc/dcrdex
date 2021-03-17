@@ -1394,6 +1394,8 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	}
 	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
+		bTimeout := t.broadcastTimeout()
+		ticksPerBTimeout := int(bTimeout / tickInterval)
 		for _, match := range matches {
 			// Mark the matches as suspect to prevent them being grouped again.
 			match.suspectSwap = true
@@ -1408,10 +1410,10 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 				// case, allow three retries before giving up.
 				lastActionTime = encode.UnixTimeMilli(int64(auditStamp))
 			}
-			if time.Since(lastActionTime) < t.broadcastTimeout() ||
-				(auditStamp == 0 && match.swapErrCount < tickCheckDivisions) {
+			if time.Since(lastActionTime) < bTimeout ||
+				(auditStamp == 0 && match.swapErrCount < ticksPerBTimeout) {
 
-				t.delayTicks(match, t.dc.tickInterval*3/4)
+				t.delayTicks(match, tickInterval*3/4)
 			} else {
 				// If we can't get a swap out before the broadcast timeout, just
 				// quit. We could also self-revoke here, but we're also
@@ -1604,6 +1606,8 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
+		bTimeout := t.broadcastTimeout()
+		ticksPerBTimeout := int(bTimeout / tickInterval)
 		// The caller will notify the user that there is a problem. We really
 		// have no way of knowing whether this is recoverable (so we can't set
 		// swapErr), but we do want to prevent redemptions every tick.
@@ -1622,9 +1626,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			}
 			lastActionTime := encode.UnixTimeMilli(int64(lastActionStamp))
 			// Try to wait until about the next auto-tick to try again.
-			waitTime := t.dc.tickInterval * 3 / 4
-			if time.Since(lastActionTime) > t.broadcastTimeout() ||
-				(lastActionStamp == 0 && match.redeemErrCount >= tickCheckDivisions) {
+			waitTime := tickInterval * 3 / 4
+			if time.Since(lastActionTime) > bTimeout ||
+				(lastActionStamp == 0 && match.redeemErrCount >= ticksPerBTimeout) {
 				// If we already missed the broadcast timeout, we're not in as
 				// much of a hurry. but keep trying and sending errors, because
 				// we do want the user to recover.

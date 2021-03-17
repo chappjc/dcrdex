@@ -424,10 +424,21 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			conn.close()
 		}
 		conn.wsMtx.Unlock()
-		close(conn.readCh) // signal to receivers that the wsConn is dead
+
+		close(conn.readCh) // signal to MessageSource receivers that the wsConn is dead
 	}()
 
-	return &conn.wg, conn.connect(ctxInternal)
+	err := conn.connect(ctxInternal)
+	if err != nil {
+		// The read loop would normally trigger keepAlive, but it wasn't started
+		// on account of a connect error.
+		conn.log.Errorf("Initial connection failed, starting reconnect loop.")
+		time.AfterFunc(5*time.Second, func() {
+			conn.reconnectCh <- struct{}{}
+		})
+	}
+
+	return &conn.wg, err
 }
 
 // Stop can be used to close the connection and all of the goroutines started by

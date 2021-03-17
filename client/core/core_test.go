@@ -199,11 +199,10 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 			},
 			Fee: tFee,
 		},
-		tickInterval: time.Millisecond * 1000 / 3,
-		notify:       func(Notification) {},
-		trades:       make(map[order.OrderID]*trackedTrade),
-		epoch:        map[string]uint64{tDcrBtcMktName: 0},
-		connected:    1,
+		notify:    func(Notification) {},
+		trades:    make(map[order.OrderID]*trackedTrade),
+		epoch:     map[string]uint64{tDcrBtcMktName: 0},
+		connected: 1,
 	}, conn, acct
 }
 
@@ -921,6 +920,7 @@ func TestMain(m *testing.M) {
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
 	tDexKey = tDexPriv.PubKey()
 	tDexAccountID = account.NewID(tDexPriv.PubKey().SerializeCompressed())
+	tickInterval = time.Millisecond * 1000 / 3
 
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.

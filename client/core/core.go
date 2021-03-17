@@ -47,9 +47,6 @@ const (
 	// regConfirmationsPaid is used to indicate completed registration to
 	// (*Core).setRegConfirms.
 	regConfirmationsPaid uint32 = math.MaxUint32
-	// tickCheckDivisions is how many times to tick trades per broadcast timeout
-	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
-	tickCheckDivisions = 8
 )
 
 var (
@@ -59,16 +56,17 @@ var (
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
 	// ever syncTickerPeriod. var instead of const for testing purposes.
 	syncTickerPeriod = 10 * time.Second
+	// tickInterval is how often to check trades.
+	tickInterval = 60 * time.Second
 )
 
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
 	comms.WsConn
-	connMaster   *dex.ConnectionMaster
-	log          dex.Logger
-	tickInterval time.Duration
-	acct         *dexAccount
-	notify       func(Notification)
+	connMaster *dex.ConnectionMaster
+	log        dex.Logger
+	acct       *dexAccount
+	notify     func(Notification)
 
 	assetsMtx sync.RWMutex
 	assets    map[uint32]*dex.Asset
@@ -3355,16 +3353,20 @@ func (c *Core) initialize() {
 	if err != nil {
 		c.log.Errorf("Error retrieving accounts from database: %v", err) // panic?
 	}
+
+	// Start connecting to DEX servers.
+	var liveConns uint32
 	var wg sync.WaitGroup
 	for _, acct := range accts {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			if !c.verifyAccount(acct) {
-				return
+			if _, connected := c.connectAccount(acct); connected {
+				atomic.AddUint32(&liveConns, 1)
 			}
 		}(acct)
 	}
+
 	dbWallets, err := c.db.Wallets()
 	if err != nil {
 		c.log.Errorf("error loading wallets from database: %v", err)
@@ -3386,10 +3388,13 @@ func (c *Core) initialize() {
 	if len(dbWallets) > 0 {
 		c.log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
 	}
-	// Wait for DEXes to be connected to ensure DEXes are ready
-	// for authentication when Login is triggered.
+
+	// Wait for DEXes to be connected to ensure DEXes are ready for
+	// authentication when Login is triggered. NOTE/TODO: Login could just as
+	// easily make the connection, but arguably configured DEXs should be
+	// available for unauthenticated operations such as watching market feeds.
 	wg.Wait()
-	c.log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
+	c.log.Infof("Successfully connected to %d out of %d DEX servers", liveConns, len(accts))
 	pluralize := func(n int) string {
 		if n == 1 {
 			return ""
@@ -3404,38 +3409,40 @@ func (c *Core) initialize() {
 	}
 }
 
-// verifyAccount verifies AccountInfo by making a connection to the DEX.
-func (c *Core) verifyAccount(acct *db.AccountInfo) bool {
+// connectAccount makes a connection to the DEX for the given account. If a
+// non-nil dexConnection is returned, it was inserted into the conns map even if
+// it is the initial connection attempt failed (connected == false); the connect
+// retry / keepalive loop is active.
+func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
+	if !acct.Paid && len(acct.FeeCoin) == 0 {
+		// Register should have set this when creating the account that was
+		// obtained via db.Accounts.
+		c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
+			"Discarding account.", acct.Host)
+		return
+	}
+
 	host, err := addrHost(acct.Host)
 	if err != nil {
-		c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
-		return false
+		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
+		return
 	}
-	dc, err := c.connectDEX(acct)
+	dc, err = c.connectDEX(acct)
+	if dc == nil {
+		c.log.Errorf("Cannot connect to DEX %s: %v", host, err)
+		return
+	}
 	if err != nil {
-		c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
-		// update failed connection, so we can give feedback.
-		c.connMtx.Lock()
-		c.conns[host] = dc
-		c.connMtx.Unlock()
-		c.log.Debugf("dex connection to %s failed", acct.Host)
-		return false
+		c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", host, err)
+	} else {
+		connected = true
 	}
-	c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
-	if !acct.Paid {
-		if len(acct.FeeCoin) == 0 {
-			// Register should have set this when creating the account
-			// that was obtained via db.Accounts.
-			c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-				"Discarding account.", acct.Host)
-			return false
-		}
-	}
+
 	c.connMtx.Lock()
 	c.conns[host] = dc
 	c.connMtx.Unlock()
-	c.log.Debugf("dex connection to %s ready", acct.Host)
-	return true
+
+	return
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a
@@ -4043,6 +4050,15 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("error parsing ws address %s: %w", wsAddr, err)
 	}
 
+	dc := &dexConnection{
+		log:    c.log,
+		acct:   newDEXAccount(acctInfo),
+		notify: c.notify,
+		books:  make(map[string]*bookie),
+		trades: make(map[order.OrderID]*trackedTrade),
+		// On connect, must set: cfg, epoch, and assets.
+	}
+
 	wsCfg := comms.WsCfg{
 		URL:      wsURL.String(),
 		PingWait: 20 * time.Second, // larger than server's pingPeriod (server/comms/server.go)
@@ -4050,10 +4066,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		ReconnectSync: func() {
 			go c.handleReconnect(host)
 		},
-		ConnectEventFunc: func(connected bool) {
-			go c.handleConnectEvent(host, connected)
-		},
-		Logger: c.log.SubLogger(wsURL.String()),
+		ConnectEventFunc: dc.handleConnectEvent,
+		Logger:           c.log.SubLogger(wsURL.String()),
 	}
 	if c.cfg.TorProxy != "" {
 		proxy := &socks.Proxy{
@@ -4069,52 +4083,31 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, err
 	}
 
-	connMaster := dex.NewConnectionMaster(conn)
-	err = connMaster.Connect(c.ctx)
-	dc := &dexConnection{
-		WsConn:     conn,
-		log:        c.log,
-		connMaster: connMaster,
-		books:      make(map[string]*bookie),
-		acct:       newDEXAccount(acctInfo),
-		trades:     make(map[order.OrderID]*trackedTrade),
-		notify:     c.notify,
-	}
-	// If the initial connection returned an error, shut it down to kill the
-	// auto-reconnect cycle.
-	if err != nil {
-		dc.connected = 0
-		connMaster.Disconnect()
-		return dc, err
-	}
-	// if no error happened update dc.connected value.
-	dc.connected = 1
+	dc.WsConn = conn
+	dc.connMaster = dex.NewConnectionMaster(conn)
 
-	// Request the market configuration. Disconnect from the DEX server if the
-	// configuration cannot be retrieved.
-	dexCfg := new(msgjson.ConfigResult)
-	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg, DefaultResponseTimeout)
-	if err != nil {
-		connMaster.Disconnect()
-		return nil, fmt.Errorf("Error fetching DEX server config: %w", err)
-	}
-	dc.cfg = dexCfg
-
-	assets, epochMap, err := generateDEXMaps(host, dexCfg)
-	if err != nil {
-		return nil, err
-	}
-	dc.epoch = epochMap
-	dc.assets = assets
-
-	// Create the dexConnection and listen for incoming messages.
-	bTimeout := time.Millisecond * time.Duration(dexCfg.BroadcastTimeout)
-	dc.tickInterval = bTimeout / tickCheckDivisions
-
-	c.log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
-
+	// Start listening for messages. The listener stops when core shuts down or
+	// the dexConnection's ConnectionMaster is shut down. This goroutine should
+	// be started as long as the reconnect loop is running. It only returns when
+	// the wsConn is stopped.
 	c.wg.Add(1)
 	go c.listen(dc)
+
+	err = dc.connMaster.Connect(c.ctx)
+	if err != nil {
+		// Not connected, but reconnect cycle is running. Caller should track
+		// this dexConnection, and a listen goroutine must be running to handle
+		// messages received when the connection is eventually established.
+		return dc, err
+	}
+
+	// Request the market configuration.
+	err = dc.refreshServerConfig() // handleReconnect must too
+	if err != nil {
+		return dc, err
+	}
+	// handleConnectEvent sets dc.connected, even on first connect
+
 	c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
 
 	return dc, nil
@@ -4139,10 +4132,15 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	err = c.authDEX(dc)
-	if err != nil {
-		c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
-		return
+	if !dc.acct.locked() {
+		err = c.authDEX(dc)
+		if err != nil {
+			c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
+			return
+		}
+	} else {
+		c.log.Infof("Connection to %v established, but you still need to login.", host)
+		// Continue to resubscribe to market fees.
 	}
 
 	type market struct {
@@ -4208,22 +4206,18 @@ func (c *Core) handleReconnect(host string) {
 // lost or established.
 //
 // NOTE: Disconnect event notifications may lag behind actual disconnections.
-func (c *Core) handleConnectEvent(host string, connected bool) {
-	c.connMtx.Lock()
-	if dc, found := c.conns[host]; found {
-		var v uint32
-		if connected {
-			v = 1
-		}
-		atomic.StoreUint32(&dc.connected, v)
+func (dc *dexConnection) handleConnectEvent(connected bool) {
+	var v uint32
+	if connected {
+		v = 1
 	}
-	c.connMtx.Unlock()
+	atomic.StoreUint32(&dc.connected, v)
 	statusStr := "connected"
 	if !connected {
 		statusStr = "disconnected"
 	}
-	details := fmt.Sprintf("DEX at %s has %s", host, statusStr)
-	c.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), host, connected, details, db.Poke))
+	details := fmt.Sprintf("DEX at %s has %s", dc.acct.host, statusStr)
+	dc.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), dc.acct.host, connected, details, db.Poke))
 }
 
 // handleMatchProofMsg is called when a match_proof notification is received.
@@ -4369,13 +4363,15 @@ var noteHandlers = map[string]routeHandler{
 }
 
 // listen monitors the DEX websocket connection for server requests and
-// notifications.
+// notifications. This should be run as a goroutine. listen will return when
+// either c.ctx is canceled or the Message channel from the dexConnection's
+// MessageSource method is closed. The latter would be the case when the
+// dexConnection's WsConn is shut down / ConnectionMaster stopped.
 func (c *Core) listen(dc *dexConnection) {
 	defer c.wg.Done()
-	msgs := dc.MessageSource()
-	// Run a match check at the tick interval. NOTE: It's possible for the
-	// broadcast timeout to change when the DEX config is updated.
-	ticker := time.NewTicker(dc.tickInterval)
+	msgs := dc.MessageSource() // dc.connMaster.Disconnect closes it
+	// Run a match check at the tick interval.
+	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	lastTick := time.Now()
 
@@ -4453,6 +4449,8 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 	}
 
+	stopTicks := make(chan struct{})
+	defer close(stopTicks)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -4461,7 +4459,7 @@ func (c *Core) listen(dc *dexConnection) {
 			case <-ticker.C:
 				sinceLast := time.Since(lastTick)
 				lastTick = time.Now()
-				if sinceLast >= 2*dc.tickInterval {
+				if sinceLast >= 2*tickInterval {
 					// The app likely just woke up from being suspended. Skip this
 					// tick to let DEX connections reconnect and resync matches.
 					c.log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
@@ -4470,7 +4468,8 @@ func (c *Core) listen(dc *dexConnection) {
 				}
 
 				checkTrades()
-
+			case <-stopTicks:
+				return
 			case <-c.ctx.Done():
 				return
 			}
@@ -4481,9 +4480,8 @@ out:
 	for {
 		select {
 		case msg, ok := <-msgs:
-
 			if !ok {
-				c.log.Debugf("Connection closed for %s.", dc.acct.host)
+				c.log.Debugf("listen(dc): Connection terminated for %s.", dc.acct.host)
 				// TODO: This just means that wsConn, which created the
 				// MessageSource channel, was shut down before this loop
 				// returned via ctx.Done. It may be necessary to investigate the
